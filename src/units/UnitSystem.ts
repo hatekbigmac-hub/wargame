@@ -108,13 +108,64 @@ export class UnitSystem {
     return n;
   }
 
-  /** Transport sails to the coast nearest (x, y) and lands its troops there. */
-  orderUnload(t: Unit, x: number, y: number): void {
+  /**
+   * Water cell next to land, in the transport's sea, closest to (x, y) — where troops
+   * bound for (x, y) should be put ashore. Returns -1 if no reachable beach is near.
+   */
+  findBeach(t: Unit, x: number, y: number, maxR = 16): number {
+    const geo = this.sim.geo;
+    let from = worldToCell(t.x, t.y);
+    if (!geo.isNavigable(from)) from = geo.nearestCell(t.x, t.y, 3, (c) => geo.isNavigable(c));
+    if (from < 0) return -1;
+    const body = geo.waterBody[from];
+    const cx = Math.floor(x / CELL);
+    const cy = Math.floor(y / CELL);
+    const beach = (c: number) => {
+      if (!geo.isNavigable(c) || geo.waterBody[c] !== body) return false;
+      const bx = c % COLS;
+      const by = (c / COLS) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = bx + dx;
+          const ny = by + dy;
+          if (nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS && geo.land[ny * COLS + nx]) return true;
+        }
+      }
+      return false;
+    };
+    for (let r = 0; r <= maxR; r++) {
+      let best = -1;
+      let bestD = Infinity;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+          const c = ny * COLS + nx;
+          if (!beach(c)) continue;
+          const d = dx * dx + dy * dy;
+          if (d < bestD) {
+            bestD = d;
+            best = c;
+          }
+        }
+      }
+      if (best >= 0) return best;
+    }
+    return -1;
+  }
+
+  /** Transport sails to the beach nearest (x, y) and lands its troops there. */
+  orderUnload(t: Unit, x: number, y: number): boolean {
+    const beach = this.findBeach(t, x, y);
+    if (beach < 0) {
+      if (t.owner === this.sim.state.player) this.sim.notifyOnce('nobeach', tr('No coast within reach of that point — pick a spot near the sea'), 'warn');
+      return false;
+    }
     this.setOrder(t, { kind: 'unload', x, y });
-    const land = this.sim.geo.nearestCell(x, y, 3, (c) => this.sim.geo.land[c] === 1);
-    const tx = land >= 0 ? cellCenterX(land) : x;
-    const ty = land >= 0 ? cellCenterY(land) : y;
-    this.requestPath(t, tx, ty);
+    this.requestPath(t, cellCenterX(beach), cellCenterY(beach));
+    return true;
   }
 
   private board(u: Unit, t: Unit): boolean {
@@ -146,6 +197,12 @@ export class UnitSystem {
       }
     }
     if (!spots.length) return 0;
+    if (destX !== undefined && destY !== undefined) {
+      // Land on the side facing the destination (and on its landmass when possible).
+      const score = (c: number) =>
+        Math.hypot(cellCenterX(c) - destX, cellCenterY(c) - destY) + (geo.landConnected(cellCenterX(c), cellCenterY(c), destX, destY) ? 0 : 10000);
+      spots.sort((a, b) => score(a) - score(b));
+    }
     const landed = t.cargo.splice(0);
     landed.forEach((u, i) => {
       const c = spots[i % spots.length];

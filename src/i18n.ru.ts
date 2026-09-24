@@ -516,6 +516,7 @@ export const RU: Record<string, string> = {
   'Transport sunk with {n} units aboard!': 'Транспорт потоплен вместе с {n} юнитами на борту!',
   'No land route — load troops onto a Transport Ship to cross the sea': 'Нет пути по суше — погрузите войска на транспорт, чтобы пересечь море',
   'No sea route to that destination': 'Нет морского пути к этой точке',
+  'No coast within reach of that point — pick a spot near the sea': 'Рядом с этой точкой нет доступного берега — выберите место у моря',
   'Move the transport next to a coast your troops can reach': 'Подведите транспорт к берегу, до которого могут дойти ваши войска',
 
   // offensives
