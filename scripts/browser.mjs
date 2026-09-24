@@ -9,6 +9,7 @@ let pw;
 try { pw = require('playwright'); } catch { pw = require('/opt/node22/lib/node_modules/playwright'); }
 
 const [,, url = 'http://localhost:5173/', out = 'scripts/.out/shot.png', stepsFile] = process.argv;
+fs.mkdirSync('scripts/.out', { recursive: true });
 const browser = await pw.chromium.launch({ args: process.env.GLARGS ? process.env.GLARGS.split(' ') : [] });
 const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
 const logs = [];

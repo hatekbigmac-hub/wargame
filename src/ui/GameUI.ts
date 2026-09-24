@@ -101,12 +101,16 @@ export class GameUI {
       if (t) this.g.controls.centerOn(Number(t.dataset.x), Number(t.dataset.y));
     });
     this.setupMinimap(mmBox);
+    this.root.addEventListener('contextmenu', (e) => e.preventDefault());
     this.setupTooltips();
     this.onSelectionChanged();
     this.cards.innerHTML = this.hintHtml();
   }
 
+  private cleanups: (() => void)[] = [];
+
   destroy(): void {
+    for (const c of this.cleanups) c();
     this.root.innerHTML = '';
   }
 
@@ -142,6 +146,7 @@ export class GameUI {
   }
 
   toast(text: string, kind: LogEntry['kind'] = 'info', x?: number, y?: number): void {
+    for (const c of Array.from(this.toasts.children)) if (c.textContent === text && !c.classList.contains('out')) return;
     const t = el('div', `toast ${kind}`, esc(text));
     if (x !== undefined && y !== undefined) {
       t.title = 'Click to view';
@@ -423,8 +428,9 @@ export class GameUI {
         ${this.actionBtn('stop', ICONS.stop, 'Stop', 'S')}
         ${this.actionBtn('hold', ICONS.hold, 'Hold', 'H', '', false, 'Hold position and fire at enemies in range')}
         ${missiles.length ? this.actionBtn('missile', ICONS.missile, `Missile (${ready})`, 'M', '', ready === 0, 'Launch a guided missile at an enemy unit or city in range', `wide ${mode === 'missile' ? 'active' : ''}`) : ''}
+        ${this.actionBtn('repairUnits', ICONS.repair, 'Repair', '', '', !own.some((u) => u.hp < u.maxHp - 1), 'Return to the nearest friendly city or port. Units in friendly cities repair over time (faster with engineers).')}
         ${this.actionBtn('center', ICONS.eye, 'Center', 'C')}
-        ${this.actionBtn('disband', ICONS.trash, 'Disband', 'DEL', '', false, 'Permanently disband selected units (saves upkeep)')}
+        ${this.actionBtn('disband', ICONS.trash, 'Disband', 'DEL', '', false, 'Permanently disband selected units (saves upkeep)', 'wide')}
       </div>`;
   }
 
@@ -500,7 +506,9 @@ export class GameUI {
       down = true;
       jump(e);
     });
-    window.addEventListener('mouseup', () => (down = false));
+    const up = () => (down = false);
+    window.addEventListener('mouseup', up);
+    this.cleanups.push(() => window.removeEventListener('mouseup', up));
     box.addEventListener('mousemove', (e) => down && jump(e));
   }
 
@@ -615,6 +623,7 @@ export class GameUI {
       case 'missile': g.beginMissile(); break;
       case 'center': g.centerOnSelection(); break;
       case 'disband': g.disbandSelected(); break;
+      case 'repairUnits': g.returnForRepairs(); break;
       case 'selType': g.select(this.selectedUnits().filter((u) => u.type === v).map((u) => u.id), false); break;
       case 'card': {
         const id = Number(v);

@@ -221,7 +221,7 @@ export class CombatSystem {
     const st = this.sim.tech.stats(u.owner, u.type);
     if (u.targetUnit >= 0) {
       const t = s.units.get(u.targetUnit);
-      if (t && !t.dead && this.canSee(u.owner, t)) {
+      if (t && !t.dead && this.canSee(u.owner, t) && atWar(s, u.owner, t.owner)) {
         const d = Math.hypot(t.x - u.x, t.y - u.y);
         if (d <= st.range && d >= (def.minRange ?? 0)) {
           this.fire(u, def, st.attack, t.x, t.y, t.id, -1);

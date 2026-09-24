@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "simtest": "node scripts/run-simtest.mjs"
+    "simtest": "node scripts/run-simtest.mjs",
+    "qa": "node scripts/browser.mjs http://localhost:5173/ scripts/.out/qa.png scripts/qa/gameplay.mjs",
+    "geo:preview": "node scripts/run-ts.mjs scripts/geo-preview.ts terrain"
   },
   "dependencies": {
     "phaser": "^3.90.0"

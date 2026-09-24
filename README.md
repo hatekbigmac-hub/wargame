@@ -12,6 +12,7 @@ npm run dev        # http://localhost:5173
 npm run build      # type-check + production build into dist/
 npm run preview    # serve the production build
 npm run simtest    # headless AI-vs-AI soak test of the whole simulation
+npm run qa         # browser gameplay test (needs `npm run dev` running and Playwright installed)
 ```
 
 The production build is a static site. Asset paths are relative (`base: './'`), so the `dist/` folder works from a domain root, a GitHub Pages sub-path, Netlify, Vercel or any static host.
@@ -51,7 +52,7 @@ The production build is a static site. Asset paths are relative (`base: './'`), 
 - **Naval units (7 types):** patrol boats, frigates, destroyers, cruisers, missile ships, submarines and aircraft carriers. Land units board transports automatically when they cross water.
 - **Submarines:** stay hidden until an enemy ship with sonar gets close, show up when they fire, and use torpedoes.
 - **Missiles:** fly an arcing path with a smoke trail, can be intercepted by anti-air, frigates and cruisers, and explode on impact.
-- **Combat:** one system handles land, naval, city and air-strike combat. Damage is data-driven, terrain gives cover, and units gain veterancy.
+- **Combat:** one system handles land, naval, city and air-strike combat. Damage is data-driven, terrain gives cover, and units gain veterancy. Damaged units repair while they sit in friendly cities or ports, faster with engineers nearby, and the **Repair** order sends them to the nearest base.
 - **Economy:** money, metal, fuel, food, electricity and industrial capacity, plus upkeep, shortages and a commodity market.
 - **Technology:** 28 technologies in four branches (Army, Navy, Air & Missiles, Industry). Air units are prepared as future content.
 - **AI:** each faction defends threatened cities, saves up for a planned army mix, researches, builds infrastructure, runs attack operations, patrols and hunts at sea, and fires missiles.

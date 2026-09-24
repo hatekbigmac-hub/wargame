@@ -228,7 +228,7 @@ export class UnitSystem {
           case 'attack': {
             if (o.targetUnit !== undefined) {
               const t = s.units.get(o.targetUnit);
-              if (!t || t.dead || !sim.combat.canSee(u.owner, t)) {
+              if (!t || t.dead || !sim.combat.canSee(u.owner, t) || !atWar(s, u.owner, t.owner)) {
                 this.setOrder(u, null);
                 u.anchorX = u.x;
                 u.anchorY = u.y;

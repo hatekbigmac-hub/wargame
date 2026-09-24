@@ -20,6 +20,7 @@ export function cityDefense(c: City): number {
 
 export class CitySystem {
   private captureTimer = 0;
+  private healTimer = 0;
   private tmp: Unit[] = [];
 
   constructor(private sim: Sim) {
@@ -42,6 +43,11 @@ export class CitySystem {
     const doCapture = this.captureTimer <= 0;
     if (doCapture) this.captureTimer = 0.25;
 
+    this.healTimer -= dt;
+    if (this.healTimer <= 0) {
+      this.healTimer = 1;
+      this.healUnits(1);
+    }
     for (const c of s.cities) {
       if (c.unrest > 0) c.unrest = Math.max(0, c.unrest - dt);
       if (c.missileCd > 0) c.missileCd -= dt;
@@ -67,6 +73,37 @@ export class CitySystem {
         if (target) sim.combat.fireFromCity(c, target);
       }
       if (doCapture) this.updateCapture(c, 0.25);
+    }
+  }
+
+  /** Units resting in friendly cities / ports repair; engineers speed it up. */
+  private healUnits(hours: number): void {
+    const s = this.sim.state;
+    for (const c of s.cities) {
+      const r = c.port ? 70 : 60;
+      let engineers = 0;
+      this.sim.spatial.forEachInRange(c.x, c.y, r, (u) => {
+        if (u.owner === c.owner && unitDef(u.type).abilities?.includes('repair')) engineers++;
+      });
+      this.sim.spatial.forEachInRange(c.x, c.y, r, (u) => {
+        if (u.owner !== c.owner || u.hp >= u.maxHp || s.time - u.lastHit < 4) return;
+        const naval = unitDef(u.type).domain === 'naval';
+        const rate = (naval ? 0.05 : 0.04) + Math.min(2, engineers) * 0.03;
+        u.hp = Math.min(u.maxHp, u.hp + u.maxHp * rate * hours);
+      });
+      if (c.port) {
+        this.sim.spatial.forEachInRange(c.portX, c.portY, 60, (u) => {
+          if (u.owner !== c.owner || u.hp >= u.maxHp || s.time - u.lastHit < 4 || unitDef(u.type).domain !== 'naval') return;
+          u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.05 * hours);
+        });
+      }
+    }
+    // Field engineers patch up nearby troops anywhere.
+    for (const e of s.units.values()) {
+      if (!unitDef(e.type).abilities?.includes('repair')) continue;
+      this.sim.spatial.forEachInRange(e.x, e.y, 80, (u) => {
+        if (u.owner === e.owner && u.hp < u.maxHp && unitDef(u.type).domain === 'land' && s.time - u.lastHit > 3) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.02 * hours);
+      });
     }
   }
 

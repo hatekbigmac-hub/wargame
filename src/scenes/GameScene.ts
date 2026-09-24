@@ -90,6 +90,10 @@ export class GameScene extends Phaser.Scene {
       this.ui.banner(f.name.toUpperCase(), 'THE WAR BEGINS', colorCss(f.color));
       sim.log(`${f.name} high command established. Good luck, Commander.`, 'info');
     } else this.ui.toast('Campaign loaded', 'good');
+    this.time.delayedCall(4000, () => {
+      const pf = this.sim.state.factions[this.sim.state.player];
+      if (!pf.research) this.ui.toast('Your scientists await orders — open Research (R) to choose a technology', 'info');
+    });
   }
 
   private onResize(): void {
@@ -452,6 +456,37 @@ export class GameScene extends Phaser.Scene {
     if (!u.length) return;
     this.sim.units.orderHold(u);
     App.audio.play('click');
+  }
+
+  /** Send selected units to the nearest friendly city (ships: nearest friendly port) to repair. */
+  returnForRepairs(): void {
+    const s = this.sim.state;
+    const units = this.ownSelected();
+    if (!units.length) return;
+    let sent = 0;
+    for (const u of units) {
+      const naval = unitDef(u.type).domain === 'naval';
+      let best = null as null | { x: number; y: number };
+      let bestD = Infinity;
+      for (const c of s.cities) {
+        if (c.owner !== s.player || (naval && !c.port)) continue;
+        const x = naval ? c.portX : c.x;
+        const y = naval ? c.portY : c.y;
+        const d = Math.hypot(x - u.x, y - u.y);
+        if (d < bestD) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+      if (best) {
+        this.sim.units.orderMove([u], best.x, best.y);
+        sent++;
+      }
+    }
+    if (sent) {
+      this.ui.toast(`${sent} unit${sent > 1 ? 's' : ''} returning to base for repairs`, 'info');
+      App.audio.play('move');
+    } else this.ui.toast('No friendly base available', 'warn');
   }
 
   disbandSelected(): void {
