@@ -109,12 +109,12 @@ export class Sim {
     this.acc += Math.min(dt, 1);
     let steps = 0;
     const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
-    while (this.acc >= SIM_STEP && steps < 8) {
+    while (this.acc >= SIM_STEP && steps < 12) {
       this.acc -= SIM_STEP;
       this.step(SIM_STEP);
       steps++;
     }
-    if (steps >= 8) this.acc = 0;
+    if (steps >= 12) this.acc = 0;
     if (steps) this.stepMs = ((typeof performance !== 'undefined' ? performance.now() : 0) - t0) / steps;
   }
 

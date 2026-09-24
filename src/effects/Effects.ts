@@ -59,15 +59,15 @@ export class Effects {
     const sc = scene;
     const P = (tex: string, cfg: Phaser.Types.GameObjects.Particles.ParticleEmitterConfig, depth: number) =>
       sc.add.particles(0, 0, tex, { emitting: false, ...cfg }).setDepth(depth);
-    this.fire = P('fx_glow', {
+    this.fire = P('fx_soft', {
       lifespan: { min: 220, max: 560 }, speed: { min: 15, max: 95 }, angle: { min: 0, max: 360 },
-      scale: { start: 0.5, end: 0.05 }, alpha: { start: 1, end: 0 }, blendMode: 'ADD',
-      color: [0xfff4c0, 0xffb040, 0xe0501a, 0x4a1406], colorEase: 'quad.out',
+      scale: { start: 0.42, end: 0.05 }, alpha: { start: 0.9, end: 0 }, blendMode: 'ADD',
+      color: [0xffd070, 0xff8a28, 0xd0400f, 0x3a1004], colorEase: 'quad.out',
     }, 32);
-    this.bigFire = P('fx_glow', {
+    this.bigFire = P('fx_soft', {
       lifespan: { min: 400, max: 900 }, speed: { min: 20, max: 150 }, angle: { min: 0, max: 360 },
-      scale: { start: 1.1, end: 0.1 }, alpha: { start: 1, end: 0 }, blendMode: 'ADD',
-      color: [0xffffff, 0xffd070, 0xff7a20, 0xa02808, 0x301006], colorEase: 'quad.out',
+      scale: { start: 0.75, end: 0.1 }, alpha: { start: 0.85, end: 0 }, blendMode: 'ADD',
+      color: [0xffe090, 0xffa040, 0xf0601a, 0x902406, 0x301006], colorEase: 'quad.out',
     }, 32);
     this.smoke = P('fx_smoke', {
       lifespan: { min: 1200, max: 2600 }, speed: { min: 4, max: 22 }, angle: { min: 240, max: 300 },
@@ -282,7 +282,7 @@ export class Effects {
   }
 
   private onDamage(u: Unit, amount: number): void {
-    if (!this.damageNumbers || this.zoom < 0.55 || amount < 1) return;
+    if (!this.damageNumbers || this.zoom < 0.7 || amount < 4) return;
     if (!this.visible(u.x, u.y, 0)) return;
     if (this.floats.length > 36) return;
     const t = this.floatPool.pop() ?? this.scene.add.text(0, 0, '', {

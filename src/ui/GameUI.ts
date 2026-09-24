@@ -4,7 +4,7 @@
 import type { GameScene } from '../scenes/GameScene';
 import type { City, LogEntry, ResKey, Unit } from '../core/types';
 import { RES_KEYS } from '../core/types';
-import { el, esc, fmt, fmtRate, costHtml, bar, hpClass, gameDate, colorCss, delegate } from './dom';
+import { el, esc, fmt, fmtRate, costHtml, bar, hpClass, gameDate, colorCss, delegate, morph } from './dom';
 import { ICONS, RES_ICON } from './icons';
 import { unitDef, PRODUCIBLE_UNITS } from '../data/units';
 import { BUILDING_DEFS, buildingCost } from '../data/buildings';
@@ -127,7 +127,7 @@ export class GameUI {
   private setSection(elm: HTMLElement, key: string, html: string): void {
     if (this.sectionCache.get(key) === html) return;
     this.sectionCache.set(key, html);
-    elm.innerHTML = html;
+    morph(elm, html);
   }
 
   private portrait(type: string, owner: string): string {
@@ -964,11 +964,8 @@ Selected   ${[...g.selection].slice(0, 6).join(',') || (g.selectedCity >= 0 ? 'c
 Money      ${fmt(this.player.res.money)} (${fmtRate(this.player.income.money)}/h)
 Frame ms   ${Object.entries(g.prof).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(' ')}
 `;
-    const html = `${esc(txt)}<div><span class="btn small" data-d="res">+Resources</span><span class="btn small" data-d="reveal">Reveal</span><span class="btn small" data-d="ai">Toggle AI</span><span class="btn small" data-d="kill">Kill sel.</span><span class="btn small" data-d="tank">Spawn army</span><span class="btn small" data-d="event">Event</span><span class="btn small" data-d="win">Win</span></div>`;
-    if (this.sectionCache.get('debug') !== html) {
-      this.sectionCache.set('debug', html);
-      d.innerHTML = html;
-    }
+    const html = `${esc(txt)}<div class="dbg-actions"><span class="btn small" data-d="res">+Resources</span><span class="btn small" data-d="reveal">Reveal</span><span class="btn small" data-d="ai">Toggle AI</span><span class="btn small" data-d="kill">Kill sel.</span><span class="btn small" data-d="tank">Spawn army</span><span class="btn small" data-d="event">Event</span><span class="btn small" data-d="win">Win</span></div>`;
+    this.setSection(d, 'debug', html);
   }
 }
 

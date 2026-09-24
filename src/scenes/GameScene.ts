@@ -135,7 +135,7 @@ export class GameScene extends Phaser.Scene {
   // ------------------------------------------------------------------ frame
 
   update(time: number, delta: number): void {
-    const dt = Math.min(delta, 100) / 1000;
+    const dt = Math.min(delta, 250) / 1000;
     const s = this.sim.state;
     let t0 = performance.now();
     this.controls.update(dt);

@@ -67,3 +67,46 @@ export function delegate(root: HTMLElement, handler: (action: string, value: str
     handler(t.dataset.a!, t.dataset.v ?? '', t, ev);
   });
 }
+
+/**
+ * Patch `target` to match `html` in place, preserving existing elements where the
+ * structure matches. Prevents buttons being replaced mid-click during live refreshes.
+ */
+export function morph(target: HTMLElement, html: string): void {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  patchChildren(target, tpl.content);
+}
+
+function patchChildren(cur: Node, next: Node): void {
+  const want = next.childNodes;
+  let i = 0;
+  for (; i < want.length; i++) {
+    const x = cur.childNodes[i];
+    const y = want[i];
+    if (!x) cur.appendChild(y.cloneNode(true));
+    else patchNode(cur, x, y);
+  }
+  while (cur.childNodes.length > want.length) cur.removeChild(cur.lastChild!);
+}
+
+function patchNode(parent: Node, x: Node, y: Node): void {
+  if (x.nodeType !== y.nodeType || x.nodeName !== y.nodeName) {
+    parent.replaceChild(y.cloneNode(true), x);
+    return;
+  }
+  if (x.nodeType === Node.TEXT_NODE || x.nodeType === Node.COMMENT_NODE) {
+    if (x.nodeValue !== y.nodeValue) x.nodeValue = y.nodeValue;
+    return;
+  }
+  if (x.nodeType !== Node.ELEMENT_NODE) return;
+  const xe = x as Element;
+  const ye = y as Element;
+  for (const a of Array.from(xe.attributes)) if (!ye.hasAttribute(a.name)) xe.removeAttribute(a.name);
+  for (const a of Array.from(ye.attributes)) if (xe.getAttribute(a.name) !== a.value) xe.setAttribute(a.name, a.value);
+  if (xe.tagName === 'svg') {
+    if (xe.innerHTML !== ye.innerHTML) xe.innerHTML = ye.innerHTML;
+    return;
+  }
+  patchChildren(xe, ye);
+}

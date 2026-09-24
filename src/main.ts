@@ -22,7 +22,7 @@ const game = new Phaser.Game({
   },
   render: { antialias: true, powerPreference: 'high-performance', roundPixels: false },
   disableContextMenu: true,
-  fps: { target: 60, min: 20 },
+  fps: { target: 60, min: 4, smoothStep: false },
   scene: [BootScene, MenuScene, GameScene],
 });
 

@@ -573,6 +573,7 @@ html, body {
   color: #b8ffcf;
 }
 .debug .btn { font-family: var(--font); margin: 2px; }
+.debug .dbg-actions { white-space: normal; display: flex; flex-wrap: wrap; margin-top: 4px; }
 .fps { position: absolute; right: 12px; bottom: 170px; font-family: ui-monospace, monospace; font-size: 12px; color: #9fe8b2; text-shadow: 0 1px 2px #000; }
 
 .cmd-hint { position: absolute; bottom: 172px; left: 50%; transform: translateX(-50%); padding: 6px 14px; font-weight: 700; letter-spacing: 0.08em; color: var(--warn); pointer-events: none; }
