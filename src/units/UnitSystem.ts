@@ -2,7 +2,7 @@
 import type { City, FactionId, Order, Unit } from '../core/types';
 import { unitDef, EMBARK_SPEED } from '../data/units';
 import { TERRAIN_SPEED } from '../map/WorldGeo';
-import { worldToCell, WORLD_W, WORLD_H } from '../config';
+import { worldToCell, cellCenterX, cellCenterY, WORLD_W, WORLD_H } from '../config';
 import type { Sim } from '../core/Simulation';
 import { atWar } from '../core/GameState';
 import type { PathDomain } from '../map/Pathfinding';
@@ -254,7 +254,7 @@ export class UnitSystem {
               const d = Math.hypot(c.x - u.x, c.y - u.y);
               const naval = def.domain === 'naval';
               const wantClose = !naval && c.hp <= 0 && (def.captureRate ?? 0) > 0;
-              const stopAt = wantClose ? CAPTURE_RADIUS * 0.5 : Math.max(24, st.range * 0.85);
+              const stopAt = wantClose ? 10 : Math.max(24, st.range * 0.85);
               if (d <= stopAt) {
                 halt = true;
               } else if (!u.pathPending && (!u.path || s.time >= u.repathAt)) {
@@ -298,6 +298,9 @@ export class UnitSystem {
       if (!halt && u.path) this.advance(u, dt, st.speed, def.domain === 'naval', def.cls);
       else u.moving = false;
 
+      // Land units that stop in the shallows step back ashore so they can fight and capture.
+      if (def.domain === 'land' && !u.moving && u.embarked) this.wadeAshore(u, dt);
+
       if (def.domain === 'land') u.embarked = !sim.geo.land[worldToCell(u.x, u.y)];
     }
 
@@ -305,6 +308,23 @@ export class UnitSystem {
     if (this.sepTimer <= 0) {
       this.sepTimer = 0.3;
       this.separate();
+    }
+  }
+
+  private wadeAshore(u: Unit, dt: number): void {
+    const geo = this.sim.geo;
+    const c = geo.nearestCell(u.x, u.y, 2, (cc) => geo.land[cc] === 1);
+    if (c < 0) return;
+    const tx = cellCenterX(c);
+    const ty = cellCenterY(c);
+    const d = Math.hypot(tx - u.x, ty - u.y);
+    if (d < 0.5) return;
+    const step = Math.min(d, 20 * dt);
+    u.x += ((tx - u.x) / d) * step;
+    u.y += ((ty - u.y) / d) * step;
+    if (!u.order) {
+      u.anchorX = u.x;
+      u.anchorY = u.y;
     }
   }
 

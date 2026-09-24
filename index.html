@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Steel Meridian — a 2D global war strategy game that runs in your browser." />
+    <title>Steel Meridian — Global War Strategy</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%230d1b2a' stroke='%23e0b04a' stroke-width='4'/%3E%3Cpath d='M32 10 L37 27 L54 27 L40 37 L45 54 L32 44 L19 54 L24 37 L10 27 L27 27Z' fill='%23e0b04a'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="game-container"></div>
+      <div id="ui"></div>
+      <div id="boot-loader">
+        <div class="boot-inner">
+          <div class="boot-logo">STEEL MERIDIAN</div>
+          <div class="boot-bar"><div class="boot-fill" id="boot-fill"></div></div>
+          <div class="boot-text" id="boot-text">Initialising command systems…</div>
+        </div>
+      </div>
+      <noscript>Steel Meridian requires JavaScript.</noscript>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

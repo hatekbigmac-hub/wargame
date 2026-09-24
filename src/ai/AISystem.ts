@@ -7,6 +7,7 @@ import { atWar } from '../core/GameState';
 import { canAfford } from '../technology/TechSystem';
 import type { Sim } from '../core/Simulation';
 import { CITY_MISSILE_RANGE } from '../combat/CombatSystem';
+import { aiDiplomacy } from '../diplomacy/Diplomacy';
 
 interface CityInfo {
   city: City;
@@ -100,6 +101,7 @@ export class AISystem {
     this.attack(f, ai, land, myCities);
     this.navy(f, ai, naval, myCities);
     this.missiles(f, myUnits, myCities, ai);
+    aiDiplomacy(sim, f);
   }
 
   // ---------------------------------------------------------------- economy

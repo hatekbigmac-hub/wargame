@@ -49,13 +49,15 @@ export class CitySystem {
       if (battery > 0 && c.missiles < battery * 2) {
         c.missiles = Math.min(battery * 2, c.missiles + dt / 50);
       }
-      // Regeneration when not under fire.
+      // Regeneration when not under fire and not besieged.
       if (c.hp < c.maxHp && s.time - c.lastAttacked > 6) {
         let rate = 0.02;
-        sim.spatial.forEachInRange(c.x, c.y, 90, (u) => {
+        let besieged = false;
+        sim.spatial.forEachInRange(c.x, c.y, 110, (u) => {
           if (u.owner === c.owner && unitDef(u.type).abilities?.includes('repair')) rate += 0.03;
+          else if (atWar(s, c.owner, u.owner) && unitDef(u.type).domain === 'land' && !u.embarked) besieged = true;
         });
-        c.hp = Math.min(c.maxHp, c.hp + c.maxHp * rate * dt);
+        if (!besieged) c.hp = Math.min(c.maxHp, c.hp + c.maxHp * rate * dt);
       }
       // Defensive fire.
       c.cooldown -= dt;
