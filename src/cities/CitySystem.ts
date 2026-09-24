@@ -136,10 +136,12 @@ export class CitySystem {
     this.sim.spatial.forEachInRange(c.x, c.y, CAPTURE_RADIUS, (u) => {
       const def = unitDef(u.type);
       if (def.domain !== 'land' || u.embarked) return;
-      if (u.owner === c.owner || !atWar(s, u.owner, c.owner)) {
+      // Only the owner's troops defend; neutral bystanders neither block nor help a capture.
+      if (u.owner === c.owner) {
         defenders++;
         return;
       }
+      if (!atWar(s, u.owner, c.owner)) return;
       power.set(u.owner, (power.get(u.owner) ?? 0) + (def.captureRate ?? 1));
     });
     if (defenders > 0 || power.size === 0) {

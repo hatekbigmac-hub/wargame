@@ -14,7 +14,7 @@ export const PREP_HOURS = 24;
 export const MAX_PREP_BONUS = 0.25;
 /** How long the bonus lasts after launch (game-hours). */
 export const BONUS_HOURS = 36;
-export const STAGE_RADIUS = 170;
+export const STAGE_RADIUS = 120;
 
 function ownedBy(sim: Sim, x: number, y: number): string | null {
   const cell = worldToCell(x, y);

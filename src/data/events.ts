@@ -1,6 +1,7 @@
 import type { City, FactionId } from '../core/types';
 import type { Sim } from '../core/Simulation';
 import { NEUTRAL_ID } from './factions';
+import { t, tn } from '../i18n';
 
 export interface EventResult {
   text: string;
@@ -38,7 +39,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'industrial_boom', 'Industrial Boom (+25% production)', 60, { prodMult: 1.25 });
-      return { text: 'Factories run triple shifts. Production +25% for 60 hours.' };
+      return { text: t('Factories run triple shifts. Production +25% for 60 hours.') };
     },
   },
   {
@@ -48,7 +49,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
       const fs = sim.state.factions[f];
       fs.res.fuel *= 0.8;
       addEffect(sim, f, 'fuel_shortage', 'Fuel Shortage (-40% fuel)', 60, { resMult: { fuel: 0.6 } });
-      return { text: 'Refinery accidents cut fuel output by 40% for 60 hours.' };
+      return { text: t('Refinery accidents cut fuel output by 40% for 60 hours.') };
     },
   },
   {
@@ -57,7 +58,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     apply: (sim, f) => {
       sim.state.factions[f].res.food *= 0.7;
       addEffect(sim, f, 'harvest_failure', 'Harvest Failure (-40% food)', 45, { resMult: { food: 0.6 } });
-      return { text: 'Blight ruins the harvest. Food stocks -30%, food income -40%.' };
+      return { text: t('Blight ruins the harvest. Food stocks -30%, food income -40%.') };
     },
   },
   {
@@ -66,7 +67,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     apply: (sim, f) => {
       const amt = Math.round(sim.rng.range(400, 900));
       sim.state.factions[f].res.money += amt;
-      return { text: `Bond markets surge. Treasury receives $${amt}.` };
+      return { text: t('Bond markets surge. Treasury receives ${amt}.', { amt }) };
     },
   },
   {
@@ -76,7 +77,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
       const fs = sim.state.factions[f];
       fs.res.metal += 220;
       fs.res.fuel += 120;
-      return { text: 'A lucrative arms deal delivers 220 metal and 120 fuel.' };
+      return { text: t('A lucrative arms deal delivers 220 metal and 120 fuel.') };
     },
   },
   {
@@ -85,7 +86,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     apply: (sim, f) => {
       const c = randomCity(sim, f, (cc) => !cc.tags.includes('o'));
       if (c) c.tags += 'o';
-      return { text: `Geologists strike oil near ${c?.name}. The city now produces fuel.`, city: c };
+      return { text: t('Geologists strike oil near {city}. The city now produces fuel.', { city: c ? tn(c) : '' }), city: c };
     },
   },
   {
@@ -95,7 +96,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
       const cities = ownedCities(sim, f).sort((a, b) => b.importance - a.importance);
       const c = cities[0];
       for (let i = 0; i < 2; i++) sim.units.spawn('infantry', f, c.x + sim.rng.range(-18, 18), c.y + sim.rng.range(-18, 18));
-      return { text: `Patriotic volunteers form two infantry battalions in ${c.name}.`, city: c };
+      return { text: t('Patriotic volunteers form two infantry battalions in {city}.', { city: tn(c) }), city: c };
     },
   },
   {
@@ -103,7 +104,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'breakthrough', 'Breakthrough (+50% research)', 50, { researchMult: 1.5 });
-      return { text: 'A research breakthrough speeds up all research by 50% for 50 hours.' };
+      return { text: t('A research breakthrough speeds up all research by 50% for 50 hours.') };
     },
   },
   {
@@ -111,7 +112,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'power_outage', 'Grid Failure (-40% power)', 40, { powerMult: 0.6 });
-      return { text: 'Cascading blackouts. Electricity supply -40% for 40 hours.' };
+      return { text: t('Cascading blackouts. Electricity supply -40% for 40 hours.') };
     },
   },
   {
@@ -119,7 +120,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'strikes', 'Strikes (-35% production)', 40, { prodMult: 0.65 });
-      return { text: 'Nationwide strikes slow production by 35% for 40 hours.' };
+      return { text: t('Nationwide strikes slow production by 35% for 40 hours.') };
     },
   },
   {
@@ -128,7 +129,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     apply: (sim, f) => {
       const c = randomCity(sim, f, (cc) => !cc.capital)!;
       c.unrest = 45;
-      return { text: `Riots in ${c.name}. Production halted and tax income halved for 45 hours.`, city: c };
+      return { text: t('Riots in {city}. Production halted and tax income halved for 45 hours.', { city: tn(c) }), city: c };
     },
   },
   {
@@ -143,12 +144,12 @@ export const WORLD_EVENTS: WorldEventDef[] = [
       });
       if (!c) {
         sim.state.factions[f].res.money *= 0.9;
-        return { text: 'Separatist agitation is bought off at the cost of 10% of the treasury.' };
+        return { text: t('Separatist agitation is bought off at the cost of 10% of the treasury.') };
       }
       sim.cities.captureCity(c, NEUTRAL_ID, true);
       c.hp = c.maxHp;
       for (let i = 0; i < 2; i++) sim.units.spawn('infantry', NEUTRAL_ID, c.x + sim.rng.range(-15, 15), c.y + sim.rng.range(-15, 15));
-      return { text: `Insurgents seize ${c.name}! Retake the city by force.`, city: c };
+      return { text: t('Insurgents seize {city}! Retake the city by force.', { city: tn(c) }), city: c };
     },
   },
   {
@@ -156,7 +157,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'war_bonds', 'War Bonds (+20% money)', 60, { resMult: { money: 1.2 } });
-      return { text: 'War bond drive raises money income by 20% for 60 hours.' };
+      return { text: t('War bond drive raises money income by 20% for 60 hours.') };
     },
   },
   {
@@ -164,7 +165,7 @@ export const WORLD_EVENTS: WorldEventDef[] = [
     canApply: () => true,
     apply: (sim, f) => {
       addEffect(sim, f, 'morale', 'High Morale (+10% attack)', 40, { attackMult: 1.1 });
-      return { text: 'Troop morale soars. All units +10% attack for 40 hours.' };
+      return { text: t('Troop morale soars. All units +10% attack for 40 hours.') };
     },
   },
 ];

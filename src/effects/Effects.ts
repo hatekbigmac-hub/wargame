@@ -1,5 +1,6 @@
 // Reusable, pooled visual effects driven by simulation events.
 import Phaser from 'phaser';
+import { t as tr } from '../i18n';
 import type { Sim } from '../core/Simulation';
 import type { Projectile, ProjectileKind, Unit } from '../core/types';
 import { projectilePos } from '../combat/CombatSystem';
@@ -304,7 +305,7 @@ export class Effects {
     this.ring(x, y, 0xffffff, 100, 600, 0.8);
     this.sparks.explode(18, x, y);
     this.fire.explode(6, x, y);
-    const t = this.scene.add.text(x, y - 30 * this.lod, 'CAPTURED', {
+    const t = this.scene.add.text(x, y - 30 * this.lod, tr('CAPTURED'), {
       fontFamily: 'Oxanium, sans-serif', fontSize: '16px', fontStyle: '800', color: '#ffffff', stroke: '#000', strokeThickness: 4,
     }).setOrigin(0.5).setDepth(41).setTint(color).setScale(this.lod).setResolution(2);
     this.scene.tweens.add({ targets: t, y: t.y - 40 * this.lod, alpha: 0, delay: 600, duration: 1200, onComplete: () => t.destroy() });

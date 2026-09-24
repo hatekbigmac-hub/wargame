@@ -15,8 +15,23 @@ import { atWar } from '../core/GameState';
 import { unitDef } from '../data/units';
 import { BUILDING_MAP } from '../data/buildings';
 import { saveToSlot, loadFromSlot } from '../save/SaveSystem';
-import { colorCss } from '../ui/dom';
-import { NEUTRAL_ID } from '../data/factions';
+import { colorCss, esc } from '../ui/dom';
+import { NEUTRAL_ID, factionName } from '../data/factions';
+import { CountryLabels } from '../map/CountryLabels';
+import { CITY_MISSILE_RANGE } from '../combat/CombatSystem';
+import { createOp, launchOp, cancelOp, needsDeclaration, STAGE_RADIUS } from '../military/Offensives';
+import { worldToCell } from '../config';
+import { t, tn } from '../i18n';
+import type { City } from '../core/types';
+
+/** A ready missile launcher: a unit or a city battery. */
+export interface Launcher {
+  unit?: Unit;
+  city?: City;
+  x: number;
+  y: number;
+  range: number;
+}
 
 export interface GameSceneData {
   faction?: FactionId;
@@ -36,6 +51,7 @@ export class GameScene extends Phaser.Scene {
   selectedCity = -1;
   mode: InputMode = 'normal';
   private overlay!: Phaser.GameObjects.Graphics;
+  private labels!: CountryLabels;
   private fogT = 0;
   private hoverT = 0;
   private autosaveT = 180;
@@ -60,7 +76,7 @@ export class GameScene extends Phaser.Scene {
     this.mode = 'normal';
     this.victoryDisabled = false;
     if (data.load) this.sim = new Sim(geo, data.load.state);
-    else this.sim = Sim.newGame(geo, data.faction ?? 'atl', data.difficulty ?? Settings.data.difficulty);
+    else this.sim = Sim.newGame(geo, data.faction ?? 'USA', data.difficulty ?? Settings.data.difficulty);
     const sim = this.sim;
     this.map = new MapRenderer(this, geo, () => sim.state.cities.map((c) => c.owner), () => sim.state.cities);
     this.map.create();
@@ -69,6 +85,7 @@ export class GameScene extends Phaser.Scene {
     this.unitViews = new UnitViews(this, sim);
     this.effects = new Effects(this, sim, this.unitViews, App.audio);
     this.overlay = this.add.graphics().setDepth(15);
+    this.labels = new CountryLabels(this, geo, (id) => sim.state.factions[id]?.alive ?? false);
     this.controls = new InputController(this);
     this.ui = new GameUI(this);
     this.wireEvents();
@@ -87,12 +104,13 @@ export class GameScene extends Phaser.Scene {
     App.audio.startMusic('game');
     const f = sim.state.factions[sim.state.player];
     if (!data.load) {
-      this.ui.banner(f.name.toUpperCase(), 'THE WAR BEGINS', colorCss(f.color));
-      sim.log(`${f.name} high command established. Good luck, Commander.`, 'info');
-    } else this.ui.toast('Campaign loaded', 'good');
-    this.time.delayedCall(4000, () => {
+      this.ui.banner(factionName(f.id).toUpperCase(), t('THE WORLD IS AT PEACE — FOR NOW'), colorCss(f.color));
+      sim.log(t('{name} high command established. Good luck, Commander.', { name: factionName(f.id) }), 'info');
+      this.time.delayedCall(3500, () => this.ui.toast(t('Tip: press the Missile Strike button (top bar) or M to launch missiles; open the Field Manual (F1) for transports and offensives'), 'info'));
+    } else this.ui.toast(t('Campaign loaded'), 'good');
+    this.time.delayedCall(9000, () => {
       const pf = this.sim.state.factions[this.sim.state.player];
-      if (!pf.research) this.ui.toast('Your scientists await orders — open Research (R) to choose a technology', 'info');
+      if (!pf.research) this.ui.toast(t('Your scientists await orders — open Research (R) to choose a technology'), 'info');
     });
   }
 
@@ -108,7 +126,7 @@ export class GameScene extends Phaser.Scene {
       this.map.markDirty();
       if (this.selectedCity === city.id && to !== s.player) this.ui.closeWindow();
       if (city.capital && (to === s.player || from === s.player)) {
-        this.ui.banner(to === s.player ? 'CAPITAL SEIZED' : 'CAPITAL LOST', city.name.toUpperCase(), to === s.player ? '#ffd27a' : '#ff5a4f');
+        this.ui.banner(to === s.player ? t('CAPITAL SEIZED') : t('CAPITAL LOST'), tn(city).toUpperCase(), to === s.player ? '#ffd27a' : '#ff5a4f');
       }
     });
     bus.on('notify', ({ text, kind, x, y }) => {
@@ -118,10 +136,10 @@ export class GameScene extends Phaser.Scene {
     bus.on('researchComplete', ({ faction }) => faction === s.player && App.audio.play('research'));
     bus.on('productionComplete', ({ city, item }) => {
       if (city.owner === s.player) App.audio.play('build', { volume: 0.5 });
-      if (item.kind === 'building' && city.owner === s.player && item.id === 'missile_battery') this.ui.toast(`${city.name}: missile battery online`, 'good');
+      if (item.kind === 'building' && city.owner === s.player && item.id === 'missile_battery') this.ui.toast(t('{city}: missile battery online', { city: tn(city) }), 'good');
     });
     bus.on('factionEliminated', ({ faction }) => {
-      if (faction !== NEUTRAL_ID) this.ui.banner('FACTION ELIMINATED', s.factions[faction].name.toUpperCase(), colorCss(s.factions[faction].color));
+      if (faction !== NEUTRAL_ID) this.ui.banner(t('COUNTRY ELIMINATED'), factionName(faction).toUpperCase(), colorCss(s.factions[faction].color));
       this.map.markDirty();
     });
     bus.on('gameOver', ({ playerWon }) => {
@@ -133,6 +151,21 @@ export class GameScene extends Phaser.Scene {
     });
     bus.on('unitRemoved', ({ unit }) => {
       if (this.selection.delete(unit.id)) this.ui.onSelectionChanged();
+    });
+    bus.on('warDeclared', ({ attacker, defender }) => {
+      this.map.markDirty();
+      if (defender === s.player) {
+        this.ui.banner(t('WAR DECLARED'), t('{name} ATTACKS', { name: factionName(attacker).toUpperCase() }), '#ff5a4f');
+        App.audio.play('alert');
+      } else if (attacker === s.player) {
+        this.ui.banner(t('WAR DECLARED'), factionName(defender).toUpperCase(), '#ff9a5a');
+      }
+    });
+    bus.on('peaceSigned', ({ a, b }) => {
+      if (a === s.player || b === s.player) this.ui.banner(t('CEASEFIRE'), factionName(a === s.player ? b : a).toUpperCase(), '#7de08f');
+    });
+    bus.on('mobilization', ({ target }) => {
+      if (target === s.player) App.audio.play('alert');
     });
   }
 
@@ -178,6 +211,7 @@ export class GameScene extends Phaser.Scene {
     this.effects.update(dt, view, time);
     t0 = this.mark('fx', t0);
     this.drawOverlay(time);
+    this.labels.update(cam.zoom, view);
     App.audio.listener = { x: view.centerX, y: view.centerY, w: view.width, h: view.height };
     this.ui.update(dt);
     this.mark('ui', t0);
@@ -186,7 +220,7 @@ export class GameScene extends Phaser.Scene {
       this.autosaveT -= dt;
       if (this.autosaveT <= 0) {
         this.autosaveT = 180;
-        if (saveToSlot(s, 'auto')) this.sim.log('Autosaved', 'info');
+        if (saveToSlot(s, 'auto')) this.sim.log(t('Autosaved'), 'info');
       }
     }
     const key = [...this.selection].join(',');
@@ -233,8 +267,73 @@ export class GameScene extends Phaser.Scene {
     if (this.mode === 'cityMissile' && this.selectedCity >= 0) {
       const c = s.cities[this.selectedCity];
       g.lineStyle(2 / zoom, 0xff9a6a, 0.6);
-      g.strokeCircle(c.x, c.y, 900);
+      g.strokeCircle(c.x, c.y, CITY_MISSILE_RANGE);
     }
+    const pulse = 0.55 + Math.sin(time * 0.005) * 0.25;
+    if (this.mode === 'strike') {
+      for (const l of this.readyLaunchers()) {
+        g.lineStyle(2 / zoom, 0xff9a6a, pulse * 0.8);
+        g.strokeCircle(l.x, l.y, l.range);
+        g.fillStyle(0xff9a6a, 0.9).fillCircle(l.x, l.y, 5 / zoom + 2);
+      }
+    }
+    if (this.mode === 'board') {
+      for (const u of s.units.values()) {
+        if (u.owner !== s.player || u.type !== 'transport') continue;
+        g.lineStyle(2.5 / zoom, 0x7dffa0, pulse);
+        g.strokeCircle(u.x, u.y, 26 + 6 / zoom);
+      }
+    }
+    // Player offensives: staging area, preparation ring and attack arrow.
+    for (const op of s.ops) {
+      const c = s.cities[op.targetCity];
+      if (!c) continue;
+      const ready = op.prep >= 1;
+      const col = ready ? 0x7dffa0 : 0xffd27a;
+      g.lineStyle(2 / zoom, col, 0.35).strokeCircle(op.stageX, op.stageY, STAGE_RADIUS);
+      g.lineStyle(5 / zoom, 0x000000, 0.35).strokeCircle(op.stageX, op.stageY, STAGE_RADIUS + 8 / zoom);
+      g.lineStyle(4 / zoom, col, 0.95);
+      g.beginPath();
+      g.arc(op.stageX, op.stageY, STAGE_RADIUS + 8 / zoom, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.01, op.prep));
+      g.strokePath();
+      this.arrow(g, op.stageX, op.stageY, c.x, c.y, col, zoom, 0.8);
+    }
+    // Enemy mobilisation against the player: pulsing red arrows.
+    for (const f of s.factionOrder) {
+      const w = s.ai[f]?.war;
+      if (!w || w.target !== s.player || w.phase !== 'mobilize') continue;
+      const a = s.cities[w.stageCity];
+      const b = s.cities[w.targetCity];
+      if (!a || !b) continue;
+      g.lineStyle(3 / zoom, 0xff4d3d, pulse * 0.6).strokeCircle(a.x, a.y, 120);
+      this.arrow(g, a.x, a.y, b.x, b.y, 0xff4d3d, zoom, pulse);
+    }
+  }
+
+  private arrow(g: Phaser.GameObjects.Graphics, x0: number, y0: number, x1: number, y1: number, color: number, zoom: number, alpha: number): void {
+    const d = Math.hypot(x1 - x0, y1 - y0);
+    if (d < 20) return;
+    const ux = (x1 - x0) / d;
+    const uy = (y1 - y0) / d;
+    const ex = x1 - ux * 34;
+    const ey = y1 - uy * 34;
+    const w = Math.max(3, 6 / zoom);
+    // Curved shaft
+    const mx = (x0 + ex) / 2 - uy * d * 0.12;
+    const my = (y0 + ey) / 2 + ux * d * 0.12;
+    const curve = new Phaser.Curves.QuadraticBezier(new Phaser.Math.Vector2(x0, y0), new Phaser.Math.Vector2(mx, my), new Phaser.Math.Vector2(ex, ey));
+    const pts = curve.getPoints(24);
+    g.lineStyle(w + 3 / zoom, 0x000000, alpha * 0.4).strokePoints(pts, false);
+    g.lineStyle(w, color, alpha).strokePoints(pts, false);
+    const last = pts[pts.length - 2];
+    const ax = ex - last.x;
+    const ay = ey - last.y;
+    const al = Math.hypot(ax, ay) || 1;
+    const hx = ax / al;
+    const hy = ay / al;
+    const hs = Math.max(14, 18 / zoom);
+    g.fillStyle(color, alpha);
+    g.fillTriangle(ex + hx * hs, ey + hy * hs, ex - hy * hs * 0.6, ey + hx * hs * 0.6, ex + hy * hs * 0.6, ey - hx * hs * 0.6);
   }
 
   // ------------------------------------------------------------------ selection
@@ -320,7 +419,7 @@ export class GameScene extends Phaser.Scene {
     const ids: number[] = [];
     this.sim.spatial.forEachInRange(c.x, c.y, 90, (u) => { if (u.owner === this.sim.state.player) ids.push(u.id); });
     if (ids.length) this.select(ids, false);
-    else this.ui.toast('No friendly units in this city', 'warn');
+    else this.ui.toast(t('No friendly units in this city'), 'warn');
   }
 
   private ownSelected(): Unit[] {
@@ -352,21 +451,28 @@ export class GameScene extends Phaser.Scene {
       this.ui.setWorldTip(null, 0, 0);
       return;
     }
+    const rel = (owner: string) =>
+      owner === s.player ? '' : atWar(s, s.player, owner) ? `<span class="bad">${t('At war')}</span>` : `<span class="good">${t('At peace')}</span>`;
     if (u) {
       const f = s.factions[u.owner];
       const def = unitDef(u.type);
       const enemy = atWar(s, s.player, u.owner) && u.owner !== s.player;
-      this.ui.setWorldTip(`<b>${def.name}</b> <span style="color:${colorCss(f.color)}">■ ${f.name}</span><br/>HP ${Math.ceil(u.hp)}/${Math.round(u.maxHp)}${u.rank ? ` · ${'★'.repeat(u.rank)}` : ''}${enemy && this.selection.size ? '<br/><span class="bad">Right-click to attack</span>' : ''}`, sx, sy);
+      const own = u.owner === s.player;
+      const cargo = u.cargo?.length ? `<br/>${t('Aboard: {n}/{max}', { n: u.cargo.length, max: def.capacity ?? 0 })}` : '';
+      const boardHint = own && u.type === 'transport' && this.hasSelectedLand() ? `<br/><span class="good">${t('Right-click to board this transport')}</span>` : '';
+      this.ui.setWorldTip(`<b>${t(def.name)}</b> <span style="color:${colorCss(f.color)}">■ ${esc(factionName(u.owner))}</span> ${rel(u.owner)}<br/>${t('HP')} ${Math.ceil(u.hp)}/${Math.round(u.maxHp)}${u.rank ? ` · ${'★'.repeat(u.rank)}` : ''}${cargo}${boardHint}${enemy && this.selection.size ? `<br/><span class="bad">${t('Right-click to attack')}</span>` : ''}`, sx, sy);
     } else if (c) {
       const f = s.factions[c.owner];
       const enemy = atWar(s, s.player, c.owner) && c.owner !== s.player;
-      this.ui.setWorldTip(`<b>${c.name}</b> <span style="color:${colorCss(f?.color ?? 0x999999)}">■ ${f?.name ?? ''}</span><br/>Defences ${Math.ceil(c.hp)}/${Math.round(c.maxHp)}${c.capture > 0 ? ` · capture ${Math.floor(c.capture * 100)}%` : ''}${enemy && this.selection.size ? '<br/><span class="bad">Right-click to assault</span>' : ''}`, sx, sy);
+      const origin = c.origOwner !== c.owner ? `<br/><span class="muted">${t('Originally {name}', { name: esc(factionName(c.origOwner)) })}</span>` : '';
+      this.ui.setWorldTip(`<b>${esc(tn(c))}</b> <span style="color:${colorCss(f?.color ?? 0x999999)}">■ ${esc(factionName(c.owner))}</span> ${rel(c.owner)}${origin}<br/>${t('Defences')} ${Math.ceil(c.hp)}/${Math.round(c.maxHp)}${c.capture > 0 ? ` · ${t('capture')} ${Math.floor(c.capture * 100)}%` : ''}${enemy && this.selection.size ? `<br/><span class="bad">${t('Right-click to assault')}</span>` : ''}`, sx, sy);
     } else this.ui.setWorldTip(null, 0, 0);
   }
 
   // ------------------------------------------------------------------ commands
 
   setMode(m: InputMode): void {
+    if (m !== 'normal' && this.ui) this.ui.closeWindow();
     this.mode = m;
     this.input.setDefaultCursor(m === 'normal' ? 'default' : 'crosshair');
   }
@@ -376,10 +482,21 @@ export class GameScene extends Phaser.Scene {
     this.tweens.add({ targets: img, scale: 0.05 / this.cameras.main.zoom, alpha: 0, duration: 450, onComplete: () => img.destroy() });
   }
 
+  private hasSelectedLand(): boolean {
+    return this.ownSelected().some((u) => unitDef(u.type).domain === 'land');
+  }
+
   commandAt(x: number, y: number, attackMove: boolean): void {
     const units = this.ownSelected();
     if (!units.length) return;
     const s = this.sim.state;
+    const land = units.filter((u) => unitDef(u.type).domain === 'land');
+    // Right-click on one of our transports with land units selected: board it.
+    const ownTransport = this.unitViews.pick(x, y, (u) => u.owner === s.player && u.type === 'transport' && !this.selection.has(u.id));
+    if (ownTransport && land.length) {
+      this.doBoard(land, ownTransport);
+      return;
+    }
     const enemy = this.unitViews.pick(x, y, (u) => u.owner !== s.player && atWar(s, s.player, u.owner));
     if (enemy) {
       this.sim.units.orderAttackUnit(units, enemy);
@@ -389,66 +506,263 @@ export class GameScene extends Phaser.Scene {
     }
     const city = this.cityViews.pick(x, y);
     if (city && city.owner !== s.player && atWar(s, s.player, city.owner)) {
-      this.sim.units.orderAttackCity(units, city);
+      const loaded = units.filter((u) => u.cargo?.length);
+      for (const tr of loaded) this.sim.units.orderUnload(tr, city.x, city.y);
+      this.sim.units.orderAttackCity(units.filter((u) => !loaded.includes(u)), city);
       this.marker(city.x, city.y, 0xff4d3d);
       App.audio.play('attack');
       return;
     }
+    if (city && city.owner !== s.player && city.owner !== NEUTRAL_ID) {
+      this.ui.toast(t('{name} is at peace with you. Use Prepare Offensive (O) or declare war in Diplomacy to attack.', { name: factionName(city.owner) }), 'info');
+    }
     const tx = city ? city.x : x;
     const ty = city ? city.y : y;
+    // Loaded transports ordered onto land: sail to that coast and put the troops ashore.
+    const loaded = units.filter((u) => u.cargo?.length);
+    if (loaded.length && this.sim.geo.isLandPassable(worldToCell(tx, ty))) {
+      for (const tr of loaded) this.sim.units.orderUnload(tr, tx, ty);
+      const rest = units.filter((u) => !loaded.includes(u));
+      if (rest.length) this.sim.units.orderMove(rest, tx, ty, attackMove);
+      this.marker(tx, ty, 0x7dd8ff);
+      this.ui.toast(t('Transport sailing to the coast to land its troops'), 'info');
+      App.audio.play('move');
+      return;
+    }
     this.sim.units.orderMove(units, tx, ty, attackMove);
     this.marker(tx, ty, attackMove ? 0xffa040 : 0x6bff8f);
     App.audio.play('move');
   }
 
+  // ------------------------------------------------------------------ transports
+
+  beginBoard(): void {
+    if (!this.hasSelectedLand()) {
+      this.ui.toast(t('Select land units first (infantry, tanks, artillery), then click a Transport Ship'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    this.setMode('board');
+  }
+
+  boardAt(x: number, y: number): void {
+    const s = this.sim.state;
+    const tr = this.unitViews.pick(x, y, (u) => u.owner === s.player && u.type === 'transport');
+    if (!tr) {
+      this.ui.toast(t('Click one of your Transport Ships'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    this.doBoard(this.ownSelected().filter((u) => unitDef(u.type).domain === 'land'), tr);
+    this.setMode('normal');
+  }
+
+  private doBoard(land: Unit[], tr: Unit): void {
+    const s = this.sim.state;
+    const cap = unitDef(tr.type).capacity ?? 0;
+    let pending = 0;
+    for (const u of s.units.values()) if (u.order?.kind === 'board' && u.order.targetUnit === tr.id && !land.includes(u)) pending++;
+    const free = cap - (tr.cargo?.length ?? 0) - pending;
+    if (free <= 0) {
+      this.ui.toast(t('Transport is full (6 units)'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    const sorted = [...land].sort((a, b) => Math.hypot(a.x - tr.x, a.y - tr.y) - Math.hypot(b.x - tr.x, b.y - tr.y));
+    const go = sorted.slice(0, free);
+    this.sim.units.orderBoard(go, tr);
+    this.marker(tr.x, tr.y, 0x7dffa0);
+    App.audio.play('move');
+    this.ui.toast(
+      t('{n} units heading to the transport ({free} free places)', { n: go.length, free }) + (land.length > free ? ` — ${t('{k} do not fit', { k: land.length - free })}` : ''),
+      'info',
+    );
+  }
+
+  beginUnload(): void {
+    const loaded = this.ownSelected().filter((u) => u.cargo?.length);
+    if (!loaded.length) {
+      this.ui.toast(t('Select a loaded Transport Ship'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    this.setMode('unload');
+  }
+
+  unloadAt(x: number, y: number): void {
+    const loaded = this.ownSelected().filter((u) => u.cargo?.length);
+    const geo = this.sim.geo;
+    if (!geo.isLandPassable(worldToCell(x, y)) && geo.nearestCell(x, y, 2, (c) => geo.land[c] === 1) < 0) {
+      this.ui.toast(t('Click on land near the coast to unload'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    for (const tr of loaded) this.sim.units.orderUnload(tr, x, y);
+    this.marker(x, y, 0x7dd8ff);
+    App.audio.play('move');
+    this.setMode('normal');
+  }
+
+  /** Put the troops ashore right where the transport is (must be next to land). */
+  unloadHere(): void {
+    const loaded = this.ownSelected().filter((u) => u.cargo?.length);
+    let n = 0;
+    for (const tr of loaded) n += this.sim.units.unloadNow(tr);
+    if (n) {
+      this.ui.toast(t('{n} units landed', { n }), 'good');
+      App.audio.play('move');
+    } else {
+      this.ui.toast(t('No beach here — move the transport next to land'), 'warn');
+      App.audio.play('error');
+    }
+  }
+
+  // ------------------------------------------------------------------ offensives
+
+  beginOffensive(): void {
+    if (!this.hasSelectedLand()) {
+      this.ui.toast(t('Select land units to prepare an offensive'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    this.setMode('offensive');
+  }
+
+  offensiveAt(x: number, y: number): void {
+    const s = this.sim.state;
+    const city = this.cityViews.pick(x, y);
+    if (!city || city.owner === s.player) {
+      this.ui.toast(t('Click a foreign city to set the offensive target'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    const r = createOp(this.sim, this.ownSelected(), city);
+    if ('error' in r) {
+      this.ui.toast(r.error, 'warn');
+      App.audio.play('error');
+      return;
+    }
+    this.setMode('normal');
+    this.marker(r.stageX, r.stageY, 0xffd27a);
+    App.audio.play('move');
+    this.ui.toast(t('Offensive on {city} planned — troops are moving to the staging area. Preparation builds up to +25% attack over 24h.', { city: tn(city) }), 'good');
+    this.ui.onSelectionChanged();
+  }
+
+  launchOperation(id: number): void {
+    const s = this.sim.state;
+    const op = s.ops.find((o) => o.id === id);
+    if (!op) return;
+    const enemy = needsDeclaration(this.sim, op);
+    const go = () => {
+      const r = launchOp(this.sim, id);
+      this.ui.toast(r.msg, r.ok ? 'good' : 'warn');
+      if (r.ok) {
+        App.audio.play('attack');
+        const c = s.cities[op.targetCity];
+        if (c) this.marker(c.x, c.y, 0xff4d3d);
+      } else App.audio.play('error');
+    };
+    if (enemy) {
+      this.ui.confirm(
+        t('Declare war?'),
+        t('Launching this offensive means declaring <b>war on {name}</b>. Their allies are not involved, but they will fight back with everything they have.', { name: esc(factionName(enemy)) }),
+        t('Declare war & attack'),
+        go,
+      );
+    } else go();
+  }
+
+  cancelOperation(id: number): void {
+    cancelOp(this.sim, id);
+    App.audio.play('click');
+  }
+
+  // ------------------------------------------------------------------ missiles
+
+  /** All of the player's missile launchers that can fire right now. */
+  readyLaunchers(): Launcher[] {
+    const s = this.sim.state;
+    const out: Launcher[] = [];
+    for (const u of s.units.values()) {
+      if (u.owner === s.player && this.sim.combat.canLaunch(u)) out.push({ unit: u, x: u.x, y: u.y, range: this.sim.combat.missileRangeOf(u) });
+    }
+    for (const c of s.cities) {
+      if (c.owner === s.player && (c.buildings.missile_battery ?? 0) > 0 && c.missiles >= 1 && c.missileCd <= 0) out.push({ city: c, x: c.x, y: c.y, range: CITY_MISSILE_RANGE });
+    }
+    return out;
+  }
+
+  /** M / missile buttons: fire from the selection if it can, otherwise use any launcher. */
   beginMissile(): void {
     if (this.selectedCity >= 0) {
       const c = this.sim.state.cities[this.selectedCity];
-      if (c.owner === this.sim.state.player && (c.buildings.missile_battery ?? 0) > 0) {
+      if (c.owner === this.sim.state.player && (c.buildings.missile_battery ?? 0) > 0 && c.missiles >= 1) {
         this.setMode('cityMissile');
         return;
       }
     }
-    const ready = this.ownSelected().filter((u) => this.sim.combat.canLaunch(u));
-    if (!ready.length) {
-      const any = this.ownSelected().some((u) => unitDef(u.type).missiles);
-      this.ui.toast(any ? 'No missiles ready — launchers are reloading' : 'Select a missile ship, missile launcher or a city with a missile battery', 'warn');
-      App.audio.play('error');
+    if (this.ownSelected().some((u) => this.sim.combat.canLaunch(u))) {
+      this.setMode('missile');
       return;
     }
-    this.setMode('missile');
+    this.beginStrike();
   }
 
-  missileAt(x: number, y: number): void {
-    const s = this.sim.state;
-    const unit = this.unitViews.pick(x, y, (u) => u.owner !== s.player && atWar(s, s.player, u.owner));
-    const city = unit ? null : this.cityViews.pick(x, y);
-    const target = unit ? { unit } : city && city.owner !== s.player && atWar(s, s.player, city.owner) ? { city } : null;
-    if (!target) {
-      this.ui.toast('Select an enemy unit or city as missile target', 'warn');
+  /** Global missile strike: the nearest ready launcher in range fires. */
+  beginStrike(): void {
+    if (!this.readyLaunchers().length) {
+      this.ui.toast(t('No missiles ready. Missiles reload over time; build a Missile Battery in a city, or Missile Launchers (Rocketry) and Missile Ships (Naval Missiles).'), 'warn');
       App.audio.play('error');
       return;
     }
+    this.setMode('strike');
+  }
+
+  missileAt(x: number, y: number, keep = false): void {
+    const s = this.sim.state;
+    const unit = this.unitViews.pick(x, y, (u) => u.owner !== s.player && this.sim.combat.canSee(s.player, u));
+    const city = unit ? null : this.cityViews.pick(x, y);
+    const owner = unit?.owner ?? (city && city.owner !== s.player ? city.owner : null);
+    if (!owner) {
+      this.ui.toast(t('Click an enemy unit or city as the missile target'), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    if (!atWar(s, s.player, owner)) {
+      this.ui.toast(t('You are not at war with {name}. Declare war in Diplomacy first.', { name: factionName(owner) }), 'warn');
+      App.audio.play('error');
+      return;
+    }
+    const target = unit ? { unit } : { city: city! };
     const tx = unit ? unit.x : city!.x;
     const ty = unit ? unit.y : city!.y;
     let ok = false;
     if (this.mode === 'cityMissile') {
       const c = s.cities[this.selectedCity];
       ok = !!c && this.sim.combat.launchCityMissile(c, target);
-      if (!ok) this.ui.toast('Target out of range or no missiles available', 'warn');
+      if (!ok) this.ui.toast(t('Target out of range ({r}) or battery reloading', { r: CITY_MISSILE_RANGE }), 'warn');
     } else {
-      const shooters = this.ownSelected()
-        .filter((u) => this.sim.combat.canLaunch(u) && Math.hypot(u.x - tx, u.y - ty) <= (unitDef(u.type).missileRange ?? 0))
-        .sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
-      if (shooters.length) ok = this.sim.combat.launchMissile(shooters[0], target);
-      if (!ok) this.ui.toast('No ready missile unit within range of that target', 'warn');
+      const pool: Launcher[] =
+        this.mode === 'missile'
+          ? this.ownSelected().filter((u) => this.sim.combat.canLaunch(u)).map((u) => ({ unit: u, x: u.x, y: u.y, range: this.sim.combat.missileRangeOf(u) }))
+          : this.readyLaunchers();
+      const inRange = pool.filter((l) => Math.hypot(l.x - tx, l.y - ty) <= l.range).sort((a, b) => Math.hypot(a.x - tx, a.y - ty) - Math.hypot(b.x - tx, b.y - ty));
+      for (const l of inRange) {
+        ok = l.unit ? this.sim.combat.launchMissile(l.unit, target) : this.sim.combat.launchCityMissile(l.city!, target);
+        if (ok) {
+          const from = l.unit ? t(unitDef(l.unit.type).name) : tn(l.city!);
+          this.sim.log(t('Missile launched from {from}', { from }), 'combat', tx, ty);
+          break;
+        }
+      }
+      if (!ok) this.ui.toast(inRange.length ? t('Target not visible to your launchers') : t('Out of range of all ready launchers — move a launcher closer'), 'warn');
     }
-    if (ok) {
-      this.marker(tx, ty, 0xff9a6a);
-      this.sim.log('Missile launched', 'combat', tx, ty);
-    } else App.audio.play('error');
-    const more = this.mode === 'cityMissile' ? (s.cities[this.selectedCity]?.missiles ?? 0) >= 1 : this.ownSelected().some((u) => this.sim.combat.canLaunch(u));
-    if (!more || !this.controls.cam) this.setMode('normal');
+    if (ok) this.marker(tx, ty, 0xff9a6a);
+    else App.audio.play('error');
+    const more = this.mode === 'cityMissile' ? (s.cities[this.selectedCity]?.missiles ?? 0) >= 1 : this.mode === 'missile' ? this.ownSelected().some((u) => this.sim.combat.canLaunch(u)) : this.readyLaunchers().length > 0;
+    if (!ok) return;
+    if (!more || !keep) this.setMode('normal');
   }
 
   orderStop(): void {
@@ -491,16 +805,16 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (sent) {
-      this.ui.toast(`${sent} unit${sent > 1 ? 's' : ''} returning to base for repairs`, 'info');
+      this.ui.toast(t('{n} units returning to base for repairs', { n: sent }), 'info');
       App.audio.play('move');
-    } else this.ui.toast('No friendly base available', 'warn');
+    } else this.ui.toast(t('No friendly base available'), 'warn');
   }
 
   disbandSelected(): void {
     const units = this.ownSelected();
     if (!units.length) return;
     for (const u of units) this.sim.units.remove(u, false, null);
-    this.ui.toast(`${units.length} unit${units.length > 1 ? 's' : ''} disbanded`, 'info');
+    this.ui.toast(t('{n} units disbanded', { n: units.length }), 'info');
     this.clearSelection();
   }
 
@@ -526,7 +840,7 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim.state;
     const idle = [...s.units.values()].filter((u) => u.owner === s.player && !u.order && u.targetUnit < 0);
     if (!idle.length) {
-      this.ui.toast('No idle units', 'info');
+      this.ui.toast(t('No idle units'), 'info');
       return;
     }
     const cur = this.selection.size === 1 ? [...this.selection][0] : -1;
@@ -556,7 +870,7 @@ export class GameScene extends Phaser.Scene {
     if (!c) return;
     const chk = this.sim.production.canProduceUnit(c, type);
     if (!chk.ok) {
-      this.ui.toast(`${unitDef(type).name}: ${chk.reason}`, 'warn');
+      this.ui.toast(`${t(unitDef(type).name)}: ${t(chk.reason ?? '')}`, 'warn');
       App.audio.play('error');
       return;
     }
@@ -569,7 +883,7 @@ export class GameScene extends Phaser.Scene {
     if (!c) return;
     const chk = this.sim.production.canBuild(c, id);
     if (!chk.ok) {
-      this.ui.toast(`${BUILDING_MAP[id]?.name}: ${chk.reason}`, 'warn');
+      this.ui.toast(`${t(BUILDING_MAP[id]?.name ?? id)}: ${t(chk.reason ?? '')}`, 'warn');
       App.audio.play('error');
       return;
     }
@@ -589,26 +903,26 @@ export class GameScene extends Phaser.Scene {
     const cost = Math.round((c.maxHp - c.hp) * 0.8);
     const f = s.factions[s.player];
     if (s.time - c.lastAttacked <= 5 || f.res.money < cost || cost <= 0) {
-      this.ui.toast('Cannot repair now (under fire or insufficient funds)', 'warn');
+      this.ui.toast(t('Cannot repair now (under fire or insufficient funds)'), 'warn');
       return;
     }
     f.res.money -= cost;
     c.hp = c.maxHp;
     App.audio.play('build');
-    this.ui.toast(`${c.name} defences restored`, 'good');
+    this.ui.toast(t('{city} defences restored', { city: tn(c) }), 'good');
   }
 
   // ------------------------------------------------------------------ save / load / flow
 
   saveGame(slot: string): void {
-    if (saveToSlot(this.sim.state, slot)) this.ui.toast('Game saved', 'good');
-    else this.ui.toast('Save failed — browser storage unavailable or full', 'bad');
+    if (saveToSlot(this.sim.state, slot)) this.ui.toast(t('Game saved'), 'good');
+    else this.ui.toast(t('Save failed — browser storage unavailable or full'), 'bad');
   }
 
   loadGame(slot: string): void {
     const data = loadFromSlot(slot);
     if (!data) {
-      this.ui.toast('Save file is missing or incompatible', 'bad');
+      this.ui.toast(t('Save file is missing or incompatible'), 'bad');
       return;
     }
     this.scene.restart({ load: data });
@@ -670,6 +984,23 @@ export class GameScene extends Phaser.Scene {
       case 'event':
         this.sim.events.trigger(s.player);
         break;
+      case 'mobilize': {
+        // Make the strongest neighbour start mobilising against the player (QA helper).
+        const me = s.cities.filter((c) => c.owner === s.player);
+        let best: { f: string; stage: number; target: number; d: number } | null = null;
+        for (const c of s.cities) {
+          if (c.owner === s.player || c.owner === NEUTRAL_ID || s.factions[c.owner]?.isPlayer) continue;
+          for (const m of me) {
+            const d = Math.hypot(c.x - m.x, c.y - m.y);
+            if (!best || d < best.d) best = { f: c.owner, stage: c.id, target: m.id, d };
+          }
+        }
+        if (best && s.ai[best.f]) {
+          s.ai[best.f].war = { target: s.player, phase: 'mobilize', started: s.time, stageCity: best.stage, targetCity: best.target, prep: 0 };
+          this.sim.bus.emit('mobilization', { faction: best.f, target: s.player, city: s.cities[best.stage] });
+        }
+        break;
+      }
       case 'win':
         s.gameOver = { winner: s.player, playerWon: true };
         this.sim.bus.emit('gameOver', { playerWon: true, winner: s.player });

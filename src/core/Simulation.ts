@@ -5,7 +5,7 @@ import { EventBus } from './EventBus';
 import { RNG } from './rng';
 import { SpatialHash } from './Spatial';
 import { createGameState } from './GameState';
-import { SIM_STEP } from '../config';
+import { SIM_STEP, worldToCell } from '../config';
 import type { WorldGeo } from '../map/WorldGeo';
 import { PathService } from '../map/Pathfinding';
 import { TechSystem } from '../technology/TechSystem';
@@ -76,10 +76,18 @@ export class Sim {
       const isPlayer = f === s.player;
       let tier = powerTier(f);
       if (isPlayer) tier = Math.max(tier, 1);
+      // Spawn on our own soil: in dense regions (Europe) a random offset can cross the border.
       const spawnNear = (type: string, x: number, y: number, r = 24) => {
-        const a = this.rng.range(0, Math.PI * 2);
-        const d = this.rng.range(8, r);
-        return this.units.spawn(type, f, x + Math.cos(a) * d, y + Math.sin(a) * d);
+        for (let tries = 0; tries < 10; tries++) {
+          const a = this.rng.range(0, Math.PI * 2);
+          const d = this.rng.range(6, r * (1 - tries * 0.08));
+          const px = x + Math.cos(a) * d;
+          const py = y + Math.sin(a) * d;
+          const cell = worldToCell(px, py);
+          const reg = this.geo.region[cell];
+          if (this.geo.isLandPassable(cell) && reg >= 0 && s.cities[reg]?.owner === f) return this.units.spawn(type, f, px, py);
+        }
+        return this.units.spawn(type, f, x + this.rng.range(-4, 4), y + this.rng.range(-4, 4));
       };
       const capital = cities.find((c) => c.capital) ?? cities[0];
       const army = [
@@ -232,7 +240,7 @@ export class Sim {
       this.log(`${tn(city)}: ${t('{item} ready', { item: label })}`, 'info', unit?.x ?? city.x, unit?.y ?? city.y);
     });
     this.bus.on('worldEvent', ({ faction, title, text, good, city }) => {
-      if (faction === s.player) this.notify(`${t(title)}: ${t(text)}`, good ? 'good' : 'bad', city?.x, city?.y);
+      if (faction === s.player) this.notify(`${t(title)}: ${text}`, good ? 'good' : 'bad', city?.x, city?.y);
       else this.log(`${name(faction)} — ${t(title)}`, 'info', city?.x, city?.y);
     });
     this.bus.on('factionEliminated', ({ faction }) => {

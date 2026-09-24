@@ -103,12 +103,14 @@ const flat = (ring) => ring.flatMap(([x, y]) => [r2(x), r2(y)]);
 
 // ------------------------------------------------------------------ countries
 const countries = load('countries');
+const MERGE = { KAS: 'IND' }; // Siachen Glacier
 const groups = new Map();
 for (const f of countries.features) {
   const p = f.properties;
   if (p.ADM0_A3 === 'ATA' || p.SOV_A3 === 'ATA') continue;
-  // Palestine is kept as its own state rather than folded into another sovereign.
-  const sov = p.ADM0_A3 === 'PSX' ? 'PSX' : p.SOV_A3;
+  // Palestine is kept as its own state rather than folded into another sovereign;
+  // uninhabited dispute zones are merged into the country that controls them.
+  const sov = p.ADM0_A3 === 'PSX' ? 'PSX' : MERGE[p.SOV_A3] ?? p.SOV_A3;
   if (!groups.has(sov)) groups.set(sov, []);
   groups.get(sov).push(f);
 }

@@ -10,8 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "simtest": "node scripts/run-simtest.mjs",
-    "qa": "node scripts/browser.mjs http://localhost:5173/ scripts/.out/qa.png scripts/qa/gameplay.mjs",
-    "geo:preview": "node scripts/run-ts.mjs scripts/geo-preview.ts terrain"
+    "qa": "node scripts/browser.mjs http://localhost:5173/ scripts/.out/qa.png scripts/qa/world.mjs",
+    "geo:preview": "node scripts/run-ts.mjs scripts/geo-preview.ts terrain",
+    "i18n:check": "node scripts/run-ts.mjs scripts/i18n-check.ts --list",
+    "captest": "node scripts/run-ts.mjs scripts/captest.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0"

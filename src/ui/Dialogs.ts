@@ -193,3 +193,17 @@ export function openCredits(host: HTMLElement, onClose?: () => void): Win {
   </div>`;
   return w;
 }
+
+/** Small modal confirmation (e.g. declaring war). */
+export function openConfirm(host: HTMLElement, title: string, html: string, okLabel: string, onOk: () => void, onClose?: () => void, danger = true): Win {
+  const w = openWindow(host, title, 'confirm-win', onClose);
+  w.root.querySelector('.window')!.setAttribute('style', 'width:440px');
+  w.body.innerHTML = `<div style="line-height:1.45;margin-bottom:14px">${html}</div>
+    <div class="row" style="justify-content:flex-end;gap:8px"><button class="btn" data-a="no">${t('Cancel')}</button><button class="btn ${danger ? 'danger' : 'primary'}" data-a="yes">${okLabel}</button></div>`;
+  delegate(w.body, (a) => {
+    App.audio.play('click');
+    w.close();
+    if (a === 'yes') onOk();
+  });
+  return w;
+}

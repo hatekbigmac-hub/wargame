@@ -24,7 +24,7 @@ export function cityYield(c: City): CityYield {
   };
   return {
     res,
-    powerSupply: 3 + c.size * 0.6 + (has('e') ? 6 : 0) + (b.power_plant ?? 0) * 8,
+    powerSupply: 4 + c.size * 0.8 + (has('e') ? 6 : 0) + (b.power_plant ?? 0) * 8,
     powerDemand: c.industry * 0.8 + (b.factory ?? 0) * 2 + (b.research_lab ?? 0) * 2 + c.size * 0.4,
     industry: c.industry + (b.factory ?? 0) * 1.5,
   };

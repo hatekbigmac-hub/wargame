@@ -1,5 +1,5 @@
 // Lightweight localisation. English strings are the keys; other languages map them.
-// t('Hello {name}', { name }) interpolates {placeholders}.
+// t("Hello {name}", { name }) interpolates {placeholders}.
 import { RU } from './i18n.ru';
 
 export type Lang = 'en' | 'ru';
@@ -25,8 +25,17 @@ export function onLangChange(fn: () => void): () => void {
   };
 }
 
+/** Keys looked up in Russian without a translation (dev builds only; read by QA scripts). */
+const missing: Set<string> | null = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ? new Set() : null;
+if (missing) (globalThis as Record<string, unknown>).__i18nMissing = missing;
+
 export function t(key: string, vars?: Record<string, string | number>): string {
-  let s = lang === 'ru' ? RU[key] ?? key : key;
+  let s = key;
+  if (lang === 'ru') {
+    const tr = RU[key];
+    if (tr !== undefined) s = tr;
+    else if (missing && key) missing.add(key);
+  }
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split(`{${k}}`).join(String(v));
   return s;
 }

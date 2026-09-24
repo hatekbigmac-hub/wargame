@@ -1,5 +1,6 @@
 // Unit lifecycle, orders and movement.
 import type { City, FactionId, Order, Unit } from '../core/types';
+import { t as tr } from '../i18n';
 import { unitDef } from '../data/units';
 import { TERRAIN_SPEED } from '../map/WorldGeo';
 import { worldToCell, cellCenterX, cellCenterY, WORLD_W, WORLD_H, CELL, COLS, ROWS } from '../config';
@@ -78,7 +79,7 @@ export class UnitSystem {
         c.dead = true;
         if (killed && fs) fs.stats.lost++;
       }
-      if (killed && u.owner === this.sim.state.player) this.sim.notify(`Transport sunk with ${u.cargo.length} units aboard!`, 'bad', u.x, u.y);
+      if (killed && u.owner === this.sim.state.player) this.sim.notify(tr('Transport sunk with {n} units aboard!', { n: u.cargo.length }), 'bad', u.x, u.y);
       u.cargo = [];
     }
     this.sim.bus.emit('unitRemoved', { unit: u, killed, by });
@@ -284,7 +285,7 @@ export class UnitSystem {
             u.anchorY = u.y;
             if (u.owner === this.sim.state.player) {
               const land = this.domainOf(u) === 'land';
-              this.sim.notifyOnce('noroute', land ? 'No land route — load troops onto a Transport Ship to cross the sea' : 'No sea route to that destination', 'warn');
+              this.sim.notifyOnce('noroute', land ? tr('No land route — load troops onto a Transport Ship to cross the sea') : tr('No sea route to that destination'), 'warn');
             }
           }
           return;
@@ -375,7 +376,7 @@ export class UnitSystem {
             if (d <= 46) {
               if (!this.board(u, t)) {
                 this.setOrder(u, null);
-                if (u.owner === s.player) sim.notifyOnce('full', 'Transport is full (6 units)', 'warn');
+                if (u.owner === s.player) sim.notifyOnce('full', tr('Transport is full (6 units)'), 'warn');
               }
               break;
             }
@@ -383,7 +384,7 @@ export class UnitSystem {
               u.repathAt = s.time + 3;
               const shore = sim.geo.nearestCell(t.x, t.y, 3, (c) => sim.geo.land[c] === 1 && sim.geo.landConnected(u.x, u.y, cellCenterX(c), cellCenterY(c)));
               if (shore < 0) {
-                if (u.owner === s.player) sim.notifyOnce('shore', 'Move the transport next to a coast your troops can reach', 'warn');
+                if (u.owner === s.player) sim.notifyOnce('shore', tr('Move the transport next to a coast your troops can reach'), 'warn');
               } else if (Math.hypot(cellCenterX(shore) - u.x, cellCenterY(shore) - u.y) > 6) {
                 this.requestPath(u, cellCenterX(shore), cellCenterY(shore));
               }
@@ -399,7 +400,7 @@ export class UnitSystem {
             }
             if (!u.path && !u.pathPending) {
               const n = this.unloadNow(u, o.x, o.y);
-              if (!n && u.owner === s.player) sim.notifyOnce('beach', 'No beach here — move the transport next to land', 'warn');
+              if (!n && u.owner === s.player) sim.notifyOnce('beach', tr('No beach here — move the transport next to land'), 'warn');
               this.setOrder(u, null);
               u.anchorX = u.x;
               u.anchorY = u.y;

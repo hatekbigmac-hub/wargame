@@ -2,6 +2,7 @@
 import type { Cost, ResKey, Resources } from '../core/types';
 import { RES_ICON } from './icons';
 import { START_DATE } from '../config';
+import { t } from '../i18n';
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls = '', html = ''): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -49,7 +50,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 export function gameDate(hours: number): { date: string; time: string; day: number } {
   const d = new Date(START_DATE + hours * 3600 * 1000);
   return {
-    date: `${String(d.getUTCDate()).padStart(2, '0')} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+    date: `${String(d.getUTCDate()).padStart(2, '0')} ${t(MONTHS[d.getUTCMonth()])} ${d.getUTCFullYear()}`,
     time: `${String(d.getUTCHours()).padStart(2, '0')}:00`,
     day: Math.floor(hours / 24) + 1,
   };

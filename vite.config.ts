@@ -11,7 +11,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
-        manualChunks: { phaser: ['phaser'] },
+        // Engine and world map data change rarely: separate chunks cache well.
+        manualChunks: (id) => (id.includes('node_modules/phaser') ? 'phaser' : id.endsWith('world.json') ? 'world' : undefined),
       },
     },
   },

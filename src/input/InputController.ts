@@ -1,12 +1,13 @@
 // Strategic camera (smooth zoom-to-cursor, drag pan, keys, edge scroll, bounds) and
 // map interaction (selection, box select, context commands, targeting modes, hotkeys).
 import Phaser from 'phaser';
+import { t } from '../i18n';
 import { WORLD_W, WORLD_H } from '../config';
 import { Settings } from '../core/Settings';
 import type { GameScene } from '../scenes/GameScene';
 import { unitDef } from '../data/units';
 
-export type InputMode = 'normal' | 'attackMove' | 'missile' | 'cityMissile';
+export type InputMode = 'normal' | 'attackMove' | 'missile' | 'cityMissile' | 'strike' | 'board' | 'unload' | 'offensive';
 
 export class InputController {
   targetZoom = 0.9;
@@ -221,8 +222,20 @@ export class InputController {
       if (!pointer.event.shiftKey) this.scene.setMode('normal');
       return;
     }
-    if (mode === 'missile' || mode === 'cityMissile') {
-      this.scene.missileAt(w.x, w.y);
+    if (mode === 'missile' || mode === 'cityMissile' || mode === 'strike') {
+      this.scene.missileAt(w.x, w.y, pointer.event.shiftKey);
+      return;
+    }
+    if (mode === 'board') {
+      this.scene.boardAt(w.x, w.y);
+      return;
+    }
+    if (mode === 'unload') {
+      this.scene.unloadAt(w.x, w.y);
+      return;
+    }
+    if (mode === 'offensive') {
+      this.scene.offensiveAt(w.x, w.y);
       return;
     }
     // Touch has no right button: with units selected, a tap on anything that is not one
@@ -254,7 +267,7 @@ export class InputController {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         this.groups.set(n, [...sc.selection]);
-        sc.ui.toast(`Group ${n} assigned (${sc.selection.size} units)`, 'info');
+        sc.ui.toast(t('Group {g} assigned ({n} units)', { g: n, n: sc.selection.size }), 'info');
       } else {
         const ids = (this.groups.get(n) ?? []).filter((id) => sc.sim.state.units.has(id));
         if (ids.length) {
@@ -287,6 +300,15 @@ export class InputController {
         break;
       case 'm':
         sc.beginMissile();
+        break;
+      case 'o':
+        sc.beginOffensive();
+        break;
+      case 'b':
+        sc.beginBoard();
+        break;
+      case 'u':
+        sc.beginUnload();
         break;
       case 'c':
       case 'f':

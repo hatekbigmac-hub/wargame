@@ -35,6 +35,12 @@ export const ICONS = {
   plane: svg('<path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 00-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z"/>'),
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 015 .5c0 1.7-2.5 2-2.5 4M12 17h.01"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  ship: svg('<path d="M3 15l2 5h14l2-5zM6 15V9h9l3 6M9 9V5h3v4"/>', '#7dd8ff'),
+  flag: svg('<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>', '#ffd27a'),
+  peace: svg('<path d="M4 13l4 4 3-1 5 4 4-4-5-5-3 1-4-4z"/><path d="M8 9l3-3 3 1"/>', '#7de08f'),
+  alert: svg('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>', '#ff7a6a'),
+  board: svg('<path d="M4 12h11M11 7l5 5-5 5M20 4v16"/>', '#7dffa0'),
+  unload: svg('<path d="M20 12H9M13 7l-5 5 5 5M4 4v16"/>', '#7dd8ff'),
   garrison: svg('<circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><path d="M3 20c0-3 2.5-5 5-5s5 2 5 5M11 20c0-3 2.5-5 5-5s5 2 5 5"/>'),
 };
 

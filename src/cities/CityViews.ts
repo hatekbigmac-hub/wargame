@@ -1,6 +1,7 @@
 // City markers: faction-tinted disc + glyph, name label, defence bar, capture ring,
 // port anchor, under-attack pulse and selection highlight. Labels are LOD-culled.
 import Phaser from 'phaser';
+import { tn, onLangChange } from '../i18n';
 import type { City } from '../core/types';
 import type { Sim } from '../core/Simulation';
 import { NEUTRAL_COLOR } from '../data/factions';
@@ -36,6 +37,10 @@ export class CityViews {
   constructor(private scene: Phaser.Scene, private sim: Sim) {
     for (const c of sim.state.cities) this.views.push(this.create(c));
     sim.bus.on('cityCaptured', ({ city }) => this.recolor(this.views[city.id]));
+    const off = onLangChange(() => {
+      for (const v of this.views) v.label.setText(tn(v.city).toUpperCase());
+    });
+    scene.events.once(Phaser.Scenes.Events.SHUTDOWN, off);
   }
 
   private color(owner: string): number {
@@ -53,7 +58,7 @@ export class CityViews {
     const glyph = sc.add.image(0, 0, `city_glyph_${city.capital ? 4 : Math.min(3, city.size)}`).setScale(0.5);
     const cap = sc.add.graphics();
     const label = sc.add
-      .text(0, r + 3, city.name.toUpperCase(), {
+      .text(0, r + 3, tn(city).toUpperCase(), {
         fontFamily: 'Rajdhani, Segoe UI, sans-serif',
         fontSize: `${city.capital ? 14 : city.size >= 3 ? 12.5 : 11.5}px`,
         fontStyle: '700',
@@ -96,7 +101,9 @@ export class CityViews {
       if (v.owner !== c.owner) this.recolor(v);
       v.c.setScale(this.lod * (c.capital ? 1.1 : 1));
       // Label LOD
-      const showLabel = c.capital || this.zoom > 0.62 || (c.size >= 3 && this.zoom > 0.36) || (c.size >= 4 && this.zoom > 0.28) || this.selected === c.id || this.hovered === c.id;
+      const z = this.zoom;
+      const showLabel =
+        this.selected === c.id || this.hovered === c.id || z > 1.05 || (c.size >= 3 && z > 0.62) || (c.capital && z > 0.5) || (c.capital && c.size >= 4 && z > 0.26);
       v.label.setVisible(showLabel);
       if (showLabel) {
         const ls = this.lod * (c.capital ? 1.1 : 1);

@@ -2,6 +2,7 @@
 // with organic borders (political / terrain / resources / military / strategic layers)
 // and fog of war. Heavy preprocessing is cached in MapAssets and shared across scenes.
 import Phaser from 'phaser';
+import { t } from '../i18n';
 import { COLS, ROWS, CELL, WORLD_W, WORLD_H, TEX_W, TEX_H, TEX_SCALE, xToLon, yToLat } from '../config';
 import { Terrain, type City, type FactionId } from '../core/types';
 import { fbm, RNG } from '../core/rng';
@@ -100,19 +101,19 @@ class MapAssetsCache {
 
   async build(geo: WorldGeo, progress: (p: number, msg: string) => void): Promise<void> {
     if (this.ready) return;
-    progress(0.1, 'Charting oceans…');
+    progress(0.1, t('Charting oceans…'));
     await nextFrame();
     this.oceanCanvas = this.buildOcean(geo);
-    progress(0.2, 'Painting continents…');
+    progress(0.2, t('Painting continents…'));
     await nextFrame();
     const biome = this.buildBiome(geo);
-    progress(0.35, 'Raising mountains…');
+    progress(0.35, t('Raising mountains…'));
     await nextFrame();
     this.terrainCanvas = this.buildTerrain(geo, biome);
-    progress(0.6, 'Drawing borders…');
+    progress(0.6, t('Drawing borders…'));
     await nextFrame();
     this.buildRegions(geo);
-    progress(0.85, 'Deploying forces…');
+    progress(0.85, t('Deploying forces…'));
     await nextFrame();
     this.ready = true;
   }

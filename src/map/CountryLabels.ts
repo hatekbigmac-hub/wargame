@@ -1,7 +1,7 @@
 // Country names drawn on the map like a political atlas. Size follows country area;
 // labels fade in/out by zoom so they never clutter the view.
 import Phaser from 'phaser';
-import { lonToX, latToY } from '../config';
+import { lonToX, latToY, CELL, COLS, ROWS } from '../config';
 import { FACTIONS } from '../data/factions';
 import type { WorldGeo } from './WorldGeo';
 import { tn, onLangChange } from '../i18n';
@@ -20,7 +20,16 @@ export class CountryLabels {
     for (const f of FACTIONS) {
       const ci = geo.countryIndex.get(f.id);
       if (ci === undefined) continue;
-      const cells = geo.countryCells[ci] ?? 0;
+      // Size by the country's land around its label point, so overseas territories
+      // (Greenland for Denmark, French Guiana for France…) don't inflate the label.
+      const lx = lonToX(f.labelLon);
+      const ly = latToY(f.labelLat);
+      const cx = Math.floor(lx / CELL);
+      const cy = Math.floor(ly / CELL);
+      let cells = 0;
+      for (let y = Math.max(0, cy - 25); y <= Math.min(ROWS - 1, cy + 25); y++) {
+        for (let x = Math.max(0, cx - 32); x <= Math.min(COLS - 1, cx + 32); x++) if (geo.cellCountry[y * COLS + x] === ci) cells++;
+      }
       if (cells < 3) continue;
       const size = Math.max(11, Math.min(62, 7 + Math.sqrt(cells) * 1.15));
       const text = scene.add
