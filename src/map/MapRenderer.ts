@@ -5,8 +5,8 @@ import Phaser from 'phaser';
 import { COLS, ROWS, CELL, WORLD_W, WORLD_H, TEX_W, TEX_H, TEX_SCALE, xToLon, yToLat } from '../config';
 import { Terrain, type City, type FactionId } from '../core/types';
 import { fbm, RNG } from '../core/rng';
-import type { WorldGeo, WorldPoly } from './WorldGeo';
-import { FACTIONS, NEUTRAL_COLOR, NEUTRAL_ID } from '../data/factions';
+import type { WorldGeo } from './WorldGeo';
+import { FACTION_MAP, NEUTRAL_COLOR, NEUTRAL_ID } from '../data/factions';
 
 export type MapLayer = 'political' | 'terrain' | 'resources' | 'military' | 'strategic';
 
@@ -96,6 +96,7 @@ class MapAssetsCache {
   pixRegion!: Int16Array;
   pixNb!: Int16Array;
   pixNbDist!: Uint8Array;
+  landMask!: HTMLCanvasElement;
 
   async build(geo: WorldGeo, progress: (p: number, msg: string) => void): Promise<void> {
     if (this.ready) return;
@@ -165,34 +166,30 @@ class MapAssetsCache {
   }
 
   private buildTerrain(geo: WorldGeo, biome: HTMLCanvasElement): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = TEX_W;
-    c.height = TEX_H;
-    const ctx = c.getContext('2d')!;
-    const landPath = () => {
-      ctx.beginPath();
-      for (const p of geo.landPolys) tracePoly(ctx, p.pts);
+    const mk = () => {
+      const c = document.createElement('canvas');
+      c.width = TEX_W;
+      c.height = TEX_H;
+      return c;
     };
-    // Shallow shelf glow around coasts.
-    ctx.save();
-    ctx.shadowColor = 'rgba(120,205,230,0.6)';
-    ctx.shadowBlur = 16;
-    ctx.fillStyle = 'rgba(120,205,230,0.4)';
-    landPath();
-    ctx.fill();
-    ctx.shadowBlur = 5;
-    ctx.fill();
-    ctx.restore();
+    // 1. Land mask from real country polygons, minus lakes and straits.
+    const mask = mk();
+    const mctx = mask.getContext('2d')!;
+    mctx.fillStyle = '#ffffff';
+    for (const p of geo.countryPolys) {
+      mctx.beginPath();
+      for (const r of p.rings) tracePoly(mctx, r);
+      mctx.fill('evenodd');
+    }
+    this.carveWater(mctx, geo);
+    this.landMask = mask;
 
-    // Land base from smoothed biome map.
-    ctx.save();
-    landPath();
-    ctx.clip();
+    // 2. Painted terrain (biomes, forests, dunes, rivers, mountains), then cut to land.
+    const terr = mk();
+    const ctx = terr.getContext('2d')!;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(biome, 0, 0, TEX_W, TEX_H);
-
-    // Terrain detail: forests, dunes, tundra speckle.
     const rng = new RNG(4242);
     const cellT = CELL * S;
     const forest = new Path2D();
@@ -221,9 +218,7 @@ class MapAssetsCache {
         dunes.moveTo(x, y);
         dunes.quadraticCurveTo(x + 2.5, y - 1.8, x + 5, y);
       } else if ((t === Terrain.Arctic || t === Terrain.Plains) && rng.chance(0.4)) {
-        const x = x0 + rng.next() * cellT;
-        const y = y0 + rng.next() * cellT;
-        speck.rect(x, y, 1, 1);
+        speck.rect(x0 + rng.next() * cellT, y0 + rng.next() * cellT, 1, 1);
       }
     }
     ctx.fillStyle = 'rgba(30,72,38,0.38)';
@@ -235,20 +230,16 @@ class MapAssetsCache {
     ctx.stroke(dunes);
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.fill(speck);
-
-    // Rivers.
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    ctx.strokeStyle = 'rgba(62,128,178,0.85)';
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = 'rgba(62,128,178,0.8)';
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
     for (const r of geo.riverLines) traceLine(ctx, r);
     ctx.stroke();
-
-    // Mountains: soft base then shaded peaks.
     for (const m of geo.mountainLines) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(92,76,58,0.32)';
+      ctx.strokeStyle = 'rgba(92,76,58,0.3)';
       ctx.lineWidth = m.width * S * 1.15;
       ctx.shadowColor = 'rgba(60,45,30,0.4)';
       ctx.shadowBlur = 6;
@@ -302,44 +293,102 @@ class MapAssetsCache {
         }
       }
     }
-    ctx.restore();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(mask, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
 
-    // Carve inland seas, lakes and straits.
+    // 3. Compose: shallow-shelf glow, terrain, then a crisp pixel coastline.
+    const out = mk();
+    const octx = out.getContext('2d', { willReadFrequently: true })!;
+    const glow = mk();
+    const gctx = glow.getContext('2d')!;
+    gctx.drawImage(mask, 0, 0);
+    gctx.globalCompositeOperation = 'source-in';
+    gctx.fillStyle = 'rgba(120,205,230,0.55)';
+    gctx.fillRect(0, 0, TEX_W, TEX_H);
+    octx.save();
+    octx.shadowColor = 'rgba(120,205,230,0.6)';
+    octx.shadowBlur = 16;
+    octx.drawImage(glow, 0, 0);
+    octx.shadowBlur = 5;
+    octx.drawImage(glow, 0, 0);
+    octx.restore();
+    octx.drawImage(terr, 0, 0);
+    const img = octx.getImageData(0, 0, TEX_W, TEX_H);
+    const d = img.data;
+    const m = mctx.getImageData(0, 0, TEX_W, TEX_H).data;
+    const W = TEX_W;
+    for (let y = 1; y < TEX_H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (m[i * 4 + 3] < 128) continue;
+        const edge = m[(i - 1) * 4 + 3] < 128 || m[(i + 1) * 4 + 3] < 128 || m[(i - W) * 4 + 3] < 128 || m[(i + W) * 4 + 3] < 128;
+        if (edge) {
+          d[i * 4] *= 0.42;
+          d[i * 4 + 1] *= 0.46;
+          d[i * 4 + 2] *= 0.5;
+          d[i * 4 + 3] = 255;
+        }
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    return out;
+  }
+
+  private carveWater(ctx: CanvasRenderingContext2D, geo: WorldGeo): void {
     ctx.save();
     ctx.globalCompositeOperation = 'destination-out';
     ctx.beginPath();
-    for (const h of geo.holePolys) tracePoly(ctx, h.pts);
-    ctx.fill();
+    for (const h of geo.lakePolys) tracePoly(ctx, h);
+    ctx.fill('evenodd');
     ctx.lineWidth = 3.2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#000';
     ctx.beginPath();
-    for (const s of geo.straitLines) traceLine(ctx, s);
+    for (const s of geo.straitLines) traceLine(ctx, s.pts);
     ctx.stroke();
     ctx.restore();
-
-    // Coastlines.
-    const strokeCoast = (polys: WorldPoly[]) => {
-      ctx.beginPath();
-      for (const p of polys) tracePoly(ctx, p.pts);
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = 'rgba(16,34,44,0.55)';
-      ctx.lineWidth = 2.2;
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(240,236,210,0.28)';
-      ctx.lineWidth = 0.8;
-      ctx.stroke();
-    };
-    strokeCoast(geo.landPolys);
-    strokeCoast(geo.holePolys);
-    return c;
   }
 
   private buildRegions(geo: WorldGeo): void {
     const W = TEX_W;
     const H = TEX_H;
-    const alpha = this.terrainCanvas.getContext('2d')!.getImageData(0, 0, W, H).data;
-    // Jitter field (quarter resolution) for organic borders.
+    // Exact country raster: every country filled with a unique colour (red channel is a
+    // bijection of the country index, so anti-aliased blends are rejected).
+    const cc = document.createElement('canvas');
+    cc.width = W;
+    cc.height = H;
+    const cctx = cc.getContext('2d', { willReadFrequently: true })!;
+    const key = (ci: number) => [((ci * 37 + 11) & 255), ((ci * 91 + 57) & 255), ((ci * 151 + 101) & 255)];
+    const lookup = new Map<number, number>();
+    for (const p of geo.countryPolys) {
+      const [r, g, b] = key(p.country);
+      lookup.set((r << 16) | (g << 8) | b, p.country);
+      cctx.fillStyle = `rgb(${r},${g},${b})`;
+      cctx.beginPath();
+      for (const ring of p.rings) tracePoly(cctx, ring);
+      cctx.fill('evenodd');
+    }
+    this.carveWater(cctx, geo);
+    const data = cctx.getImageData(0, 0, W, H).data;
+    const pc = new Int16Array(W * H).fill(-1);
+    for (let i = 0; i < W * H; i++) {
+      if (data[i * 4 + 3] < 128) continue;
+      pc[i] = lookup.get((data[i * 4] << 16) | (data[i * 4 + 1] << 8) | data[i * 4 + 2]) ?? -2;
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (pc[i] !== -2) continue;
+        const cand = [pc[i - 1], pc[i + 1], pc[i - W], pc[i + W], pc[i - W - 1], pc[i + W + 1]];
+        const v = cand.find((c) => c >= 0);
+        if (v !== undefined) pc[i] = v;
+      }
+    }
+    for (let i = 0; i < W * H; i++) if (pc[i] === -2) pc[i] = -1;
+
+    // Regions: jittered cell lookup for organic internal borders, always inside the pixel's country.
     const JW = (W >> 2) + 2;
     const JH = (H >> 2) + 2;
     const jx = new Float32Array(JW * JH);
@@ -348,16 +397,21 @@ class MapAssetsCache {
       jx[y * JW + x] = (fbm(x * 0.13, y * 0.13, 4, 11) - 0.5) * 30 + (fbm(x * 0.5, y * 0.5, 2, 5) - 0.5) * 16;
       jy[y * JW + x] = (fbm(x * 0.13, y * 0.13, 4, 23) - 0.5) * 30 + (fbm(x * 0.5, y * 0.5, 2, 9) - 0.5) * 16;
     }
+    const firstRegion = new Int16Array(geo.countryIds.length).fill(-1);
+    geo.cities.forEach((c, i) => {
+      if (firstRegion[c.country] < 0) firstRegion[c.country] = i;
+    });
     const pr = new Int16Array(W * H).fill(-1);
     const region = geo.region;
-    const land = geo.land;
+    const cellC = geo.cellCountry;
     for (let py = 0; py < H; py++) {
       const fy = py / 4;
       const y0 = Math.floor(fy);
       const ty = fy - y0;
       for (let px = 0; px < W; px++) {
         const i = py * W + px;
-        if (alpha[i * 4 + 3] < 140) continue;
+        const country = pc[i];
+        if (country < 0) continue;
         const fx = px / 4;
         const x0 = Math.floor(fx);
         const tx = fx - x0;
@@ -366,23 +420,22 @@ class MapAssetsCache {
         const oy = (jy[j] * (1 - tx) + jy[j + 1] * tx) * (1 - ty) + (jy[j + JW] * (1 - tx) + jy[j + JW + 1] * tx) * ty;
         const wx = (px + 0.5) * TEX_SCALE;
         const wy = (py + 0.5) * TEX_SCALE;
-        let cx = Math.floor((wx + ox) / CELL);
-        let cy = Math.floor((wy + oy) / CELL);
-        cx = cx < 0 ? 0 : cx >= COLS ? COLS - 1 : cx;
-        cy = cy < 0 ? 0 : cy >= ROWS ? ROWS - 1 : cy;
-        let r = land[cy * COLS + cx] ? region[cy * COLS + cx] : -1;
-        if (r < 0) {
-          const ux = Math.min(COLS - 1, Math.floor(wx / CELL));
-          const uy = Math.min(ROWS - 1, Math.floor(wy / CELL));
-          r = region[uy * COLS + ux];
-          if (r < 0) {
-            for (let dy = -1; dy <= 1 && r < 0; dy++) for (let dx = -1; dx <= 1 && r < 0; dx++) {
-              const nx = ux + dx, ny = uy + dy;
-              if (nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS) r = region[ny * COLS + nx];
+        let cx = Math.min(COLS - 1, Math.max(0, Math.floor((wx + ox) / CELL)));
+        let cy = Math.min(ROWS - 1, Math.max(0, Math.floor((wy + oy) / CELL)));
+        let cell = cy * COLS + cx;
+        if (cellC[cell] !== country) {
+          cx = Math.min(COLS - 1, Math.floor(wx / CELL));
+          cy = Math.min(ROWS - 1, Math.floor(wy / CELL));
+          cell = cy * COLS + cx;
+          if (cellC[cell] !== country) {
+            cell = -1;
+            for (let dy = -1; dy <= 1 && cell < 0; dy++) for (let dx = -1; dx <= 1 && cell < 0; dx++) {
+              const nx = cx + dx, ny = cy + dy;
+              if (nx >= 0 && ny >= 0 && nx < COLS && ny < ROWS && cellC[ny * COLS + nx] === country) cell = ny * COLS + nx;
             }
           }
         }
-        pr[i] = r;
+        pr[i] = cell >= 0 && region[cell] >= 0 ? region[cell] : firstRegion[country];
       }
     }
     const nb = new Int16Array(W * H).fill(-1);
@@ -397,11 +450,11 @@ class MapAssetsCache {
         const i = py * W + px;
         const r = pr[i];
         if (r < 0) continue;
-        for (const [dx, dy, d] of offs) {
+        for (const [dx, dy, dd] of offs) {
           const o = pr[i + dy * W + dx];
           if (o >= 0 && o !== r) {
             nb[i] = o;
-            nd[i] = d;
+            nd[i] = dd;
             break;
           }
         }
@@ -494,7 +547,7 @@ export class MapRenderer {
     if (this.dirty && time - this.lastRender > 250) this.renderTerritory(time);
   }
 
-  private regionColors(): { fill: Uint32Array; bright: Uint32Array; bright2: Uint32Array; prov: Uint32Array; owner: Int16Array } {
+  private regionColors(): { fill: Uint32Array; bright: Uint32Array; bright2: Uint32Array; prov: Uint32Array; old: Uint32Array; owner: Int32Array } {
     const cities = this.cities();
     const owners = this.ownerOf();
     const R = cities.length;
@@ -502,52 +555,56 @@ export class MapRenderer {
     const bright = new Uint32Array(R);
     const bright2 = new Uint32Array(R);
     const prov = new Uint32Array(R);
-    const owner = new Int16Array(R);
-    const fIndex = new Map<FactionId, number>(FACTIONS.map((f, i) => [f.id, i]));
-    const colorOf = (f: FactionId) => (f === NEUTRAL_ID ? NEUTRAL_COLOR : FACTIONS[fIndex.get(f) ?? 0]?.color ?? NEUTRAL_COLOR);
+    const old = new Uint32Array(R);
+    const owner = new Int32Array(R);
+    const ids = new Map<FactionId, number>();
+    const colorOf = (f: FactionId) => (f === NEUTRAL_ID ? NEUTRAL_COLOR : FACTION_MAP[f]?.color ?? NEUTRAL_COLOR);
     const layer = this.layer;
     let minI = Infinity, maxI = -Infinity;
     for (const c of cities) { minI = Math.min(minI, c.importance); maxI = Math.max(maxI, c.importance); }
     for (let r = 0; r < R; r++) {
       const f = owners[r];
-      owner[r] = f === NEUTRAL_ID ? 99 : fIndex.get(f) ?? 98;
+      if (!ids.has(f)) ids.set(f, ids.size);
+      owner[r] = ids.get(f)!;
       const fc = rgb(colorOf(f));
-      const light = mix(fc, [255, 255, 255], 0.35);
-      const dark = mix(fc, [0, 0, 0], 0.45);
+      const light = mix(fc, [255, 255, 255], 0.4);
+      const dark = mix(fc, [0, 0, 0], 0.5);
       let base = fc;
-      let a = 0.3;
-      if (layer === 'terrain') a = 0.03;
-      else if (layer === 'military') a = 0.16;
+      let a = 0.42;
+      if (layer === 'terrain') a = 0.04;
+      else if (layer === 'military') a = 0.2;
       else if (layer === 'resources') {
         const t = cities[r].tags;
         base = t.includes('o') ? [58, 40, 80] : t.includes('m') ? [120, 150, 185] : t.includes('f') ? [170, 210, 70] : t.includes('e') ? [250, 210, 60] : [120, 120, 120];
-        a = t.length ? 0.5 : 0.18;
+        a = t.length ? 0.55 : 0.18;
       } else if (layer === 'strategic') {
         const k = (cities[r].importance - minI) / Math.max(1, maxI - minI);
         base = k < 0.5 ? mix([40, 110, 220], [240, 210, 60], k * 2) : mix([240, 210, 60], [224, 52, 40], (k - 0.5) * 2);
-        a = 0.5;
+        a = 0.55;
       }
       fill[r] = pack(base[0], base[1], base[2], a);
-      const ba = layer === 'terrain' ? 0.55 : 0.85;
+      const ba = layer === 'terrain' ? 0.55 : 0.9;
       bright[r] = pack(light[0], light[1], light[2], ba);
-      bright2[r] = pack(fc[0], fc[1], fc[2], ba * 0.6);
-      prov[r] = pack(dark[0], dark[1], dark[2], layer === 'terrain' ? 0.12 : 0.4);
+      bright2[r] = pack(fc[0], fc[1], fc[2], ba * 0.65);
+      prov[r] = pack(dark[0], dark[1], dark[2], layer === 'terrain' ? 0.08 : 0.16);
+      old[r] = pack(dark[0] * 0.6, dark[1] * 0.6, dark[2] * 0.6, layer === 'terrain' ? 0.35 : 0.55);
     }
-    return { fill, bright, bright2, prov, owner };
+    return { fill, bright, bright2, prov, old, owner };
   }
 
   renderTerritory(time = 0): void {
     const t0 = performance.now();
     this.dirty = false;
     this.lastRender = time;
-    const { fill, bright, bright2, prov, owner } = this.regionColors();
+    const { fill, bright, bright2, prov, old, owner } = this.regionColors();
+    const country = this.geo.regionCountry;
     const ctx = this.territoryTex.getContext();
     const img = ctx.createImageData(TEX_W, TEX_H);
     const d32 = new Uint32Array(img.data.buffer);
     const pr = MapAssets.pixRegion;
     const nb = MapAssets.pixNb;
     const nd = MapAssets.pixNbDist;
-    const edge = pack(8, 10, 14, 0.85);
+    const edge = pack(8, 10, 14, 0.9);
     const n = TEX_W * TEX_H;
     for (let i = 0; i < n; i++) {
       const r = pr[i];
@@ -556,8 +613,12 @@ export class MapRenderer {
       if (o < 0) {
         d32[i] = fill[r];
       } else if (owner[o] !== owner[r]) {
+        // Front line / national border between different owners.
         const d = nd[i];
         d32[i] = d === 1 ? edge : d === 2 ? bright[r] : bright2[r];
+      } else if (country[o] !== country[r]) {
+        // Pre-war international border inside one owner's territory.
+        d32[i] = nd[i] === 1 ? old[r] : fill[r];
       } else {
         d32[i] = nd[i] === 1 ? prov[r] : fill[r];
       }

@@ -1,130 +1,78 @@
 import type { FactionDef } from '../core/types';
+import { WORLD } from './world';
+import { t, tn } from '../i18n';
 
-// Fictional power blocs inspired by Earth's regions. Add a faction by appending here
-// and assigning cities to it in cities.ts — no other code needs to change.
-export const FACTIONS: FactionDef[] = [
-  {
-    id: 'atl',
-    name: 'Atlantic Union',
-    short: 'ATU',
-    color: 0x3b7ff5,
-    css: '#3b7ff5',
-    capital: 'Washington',
-    desc: 'A continental superpower with deep industry, two ocean coastlines and a powerful navy.',
-    motto: 'Strength across two oceans',
-    difficulty: 'Easy',
-    personality: { aggression: 0.55, naval: 0.7, tech: 0.6, defense: 0.5 },
-    startingResources: { money: 2200, metal: 650, fuel: 450, food: 450 },
-  },
-  {
-    id: 'sco',
-    name: 'Southern Concord',
-    short: 'SCO',
-    color: 0x2fb35a,
-    css: '#2fb35a',
-    capital: 'Brasília',
-    desc: 'A vast alliance of the Americas south of the Rio Grande, rich in food and raw materials.',
-    motto: 'One continent, one destiny',
-    difficulty: 'Normal',
-    personality: { aggression: 0.5, naval: 0.45, tech: 0.4, defense: 0.6 },
-    startingResources: { money: 2000, metal: 600, fuel: 400, food: 550 },
-  },
-  {
-    id: 'euf',
-    name: 'European Federation',
-    short: 'EUF',
-    color: 0x8e5cf7,
-    css: '#8e5cf7',
-    capital: 'Paris',
-    desc: 'Dense, wealthy and technologically advanced, but hemmed in by rivals on every side.',
-    motto: 'United in diversity, unbroken in war',
-    difficulty: 'Hard',
-    personality: { aggression: 0.45, naval: 0.55, tech: 0.8, defense: 0.6 },
-    startingResources: { money: 2300, metal: 550, fuel: 350, food: 400 },
-  },
-  {
-    id: 'nfd',
-    name: 'Northern Federation',
-    short: 'NFD',
-    color: 0xd93b3b,
-    css: '#d93b3b',
-    capital: 'Moscow',
-    desc: 'An enormous northern empire spanning eleven time zones, with endless steppe and vast reserves.',
-    motto: 'The north endures',
-    difficulty: 'Normal',
-    personality: { aggression: 0.7, naval: 0.35, tech: 0.5, defense: 0.5 },
-    startingResources: { money: 2000, metal: 700, fuel: 550, food: 400 },
-  },
-  {
-    id: 'cel',
-    name: 'Celestial Directorate',
-    short: 'CEL',
-    color: 0xf2c230,
-    css: '#f2c230',
-    capital: 'Beijing',
-    desc: 'An industrial giant with the largest manufacturing base on the planet.',
-    motto: 'Harmony through strength',
-    difficulty: 'Easy',
-    personality: { aggression: 0.6, naval: 0.55, tech: 0.6, defense: 0.5 },
-    startingResources: { money: 2200, metal: 700, fuel: 400, food: 450 },
-  },
-  {
-    id: 'ind',
-    name: 'Indus Union',
-    short: 'IND',
-    color: 0xf08a2a,
-    css: '#f08a2a',
-    capital: 'New Delhi',
-    desc: 'A populous southern power guarding the Himalaya and commanding the Indian Ocean.',
-    motto: 'Many peoples, one shield',
-    difficulty: 'Normal',
-    personality: { aggression: 0.5, naval: 0.5, tech: 0.55, defense: 0.6 },
-    startingResources: { money: 2000, metal: 550, fuel: 350, food: 550 },
-  },
-  {
-    id: 'cre',
-    name: 'Crescent League',
-    short: 'CRL',
-    color: 0x1fb5a5,
-    css: '#1fb5a5',
-    capital: 'Istanbul',
-    desc: 'Controls the crossroads of three continents and most of the world\'s oil.',
-    motto: 'Where three worlds meet',
-    difficulty: 'Normal',
-    personality: { aggression: 0.6, naval: 0.4, tech: 0.45, defense: 0.55 },
-    startingResources: { money: 2100, metal: 500, fuel: 700, food: 350 },
-  },
-  {
-    id: 'afr',
-    name: 'African Coalition',
-    short: 'AFC',
-    color: 0xd6458f,
-    css: '#d6458f',
-    capital: 'Lagos',
-    desc: 'A young coalition with enormous mineral wealth and room to grow.',
-    motto: 'Rise together',
-    difficulty: 'Hard',
-    personality: { aggression: 0.5, naval: 0.3, tech: 0.4, defense: 0.6 },
-    startingResources: { money: 1900, metal: 750, fuel: 450, food: 450 },
-  },
-  {
-    id: 'pac',
-    name: 'Pacific Alliance',
-    short: 'PAC',
-    color: 0x55d0ee,
-    css: '#55d0ee',
-    capital: 'Tokyo',
-    desc: 'An island-spanning maritime alliance from Japan to New Zealand. Masters of the sea.',
-    motto: 'The ocean is our road',
-    difficulty: 'Hard',
-    personality: { aggression: 0.45, naval: 0.9, tech: 0.7, defense: 0.5 },
-    startingResources: { money: 2200, metal: 500, fuel: 450, food: 400 },
-  },
+// Every sovereign country from the Natural Earth dataset is a playable faction.
+// Colours come from a 12-colour political palette assigned so neighbours differ.
+export const PALETTE = [
+  0xd9644f, 0xe39b3f, 0xe0c24a, 0x9cc653, 0x4fb36b, 0x3fb3a6, 0x4c9fd9, 0x5a74d6, 0x8b67d1, 0xc064b8, 0xd9738f, 0xb08a5a,
 ];
+
+function hash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0) / 4294967296;
+}
+
+const cityRows = WORLD.cities;
+
+export const FACTIONS: FactionDef[] = WORLD.countries.map((c) => {
+  const mine = cityRows.filter((r) => r[4] === c.id);
+  const power = mine.reduce((s, r) => s + r[5] * r[6], 0);
+  const capital = mine.find((r) => r[7] === 1) ?? mine[0];
+  const h = hash(c.id);
+  const color = PALETTE[c.col % PALETTE.length];
+  const big = power >= 40;
+  return {
+    id: c.id,
+    name: c.name,
+    ru: c.ru,
+    short: c.id,
+    color,
+    css: `#${color.toString(16).padStart(6, '0')}`,
+    capital: capital ? capital[0] : c.name,
+    continent: c.cont,
+    population: c.pop,
+    gdp: c.gdp,
+    neighbors: c.nb,
+    labelLon: c.lx,
+    labelLat: c.ly,
+    power,
+    personality: {
+      aggression: Math.min(0.95, 0.25 + h * 0.5 + (big ? 0.12 : 0)),
+      naval: 0.3 + hash(c.id + 'n') * 0.6,
+      tech: Math.min(1, 0.3 + (c.gdp / Math.max(1, c.pop)) / 60),
+      defense: 0.4 + hash(c.id + 'd') * 0.4,
+    },
+    startingResources: {
+      money: Math.round(700 + power * 45),
+      metal: Math.round(180 + power * 12),
+      fuel: Math.round(140 + power * 10),
+      food: Math.round(200 + power * 10),
+    },
+  };
+});
+
+export const FACTION_MAP: Record<string, FactionDef> = Object.fromEntries(FACTIONS.map((f) => [f.id, f]));
 
 export const NEUTRAL_ID = 'neutral';
 export const NEUTRAL_COLOR = 0x8d939c;
 
 export function getFactionDef(id: string): FactionDef | undefined {
-  return FACTIONS.find((f) => f.id === id);
+  return FACTION_MAP[id];
 }
+
+/** Localised display name for a faction id. */
+export function factionName(id: string): string {
+  if (id === NEUTRAL_ID) return t('Insurgents');
+  const d = FACTION_MAP[id];
+  return d ? tn(d) : id;
+}
+
+/** 0 minor · 1 regional · 2 major · 3 great power (drives starting forces and AI pacing). */
+export function powerTier(id: string): number {
+  const p = FACTION_MAP[id]?.power ?? 0;
+  return p >= 60 ? 3 : p >= 25 ? 2 : p >= 10 ? 1 : 0;
+}
+
+export const TIER_NAMES = ['Minor state', 'Regional power', 'Major power', 'Great power'];

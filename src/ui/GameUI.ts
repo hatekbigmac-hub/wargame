@@ -955,8 +955,8 @@ export class GameUI {
     const mp = g.controls.toWorld(g.game.input.activePointer.x, g.game.input.activePointer.y);
     const cell = worldToCell(mp.x, mp.y);
     let visCells = 0;
-    const bit = g.sim.combat.bit(s.player);
-    for (let i = 0; i < g.sim.combat.visMask.length; i += 1) if (g.sim.combat.visMask[i] & bit) visCells++;
+    const vis = g.sim.combat.playerVis;
+    for (let i = 0; i < vis.length; i += 1) visCells += vis[i];
     const ai = s.ai[s.factionOrder.find((f) => f !== s.player)!];
     const txt = `FPS        ${g.game.loop.actualFps.toFixed(0)}
 Sim time   ${s.time.toFixed(1)}h  speed ${s.speed}x ${s.paused ? '(paused)' : ''}

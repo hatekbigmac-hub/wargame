@@ -36,7 +36,9 @@ function storage(): Storage | null {
 }
 
 export function serializeGame(state: GameState, label: string): string {
-  const units = [...state.units.values()].filter((u) => !u.dead).map((u) => ({ ...u, pathPending: false }));
+  const units = [...state.units.values()]
+    .filter((u) => !u.dead)
+    .map((u) => ({ ...u, pathPending: false, cargo: u.cargo?.map((c) => ({ ...c, pathPending: false })) }));
   const file: SaveFile = {
     version: SAVE_VERSION,
     meta: {
@@ -50,7 +52,8 @@ export function serializeGame(state: GameState, label: string): string {
     },
     state: { ...state, units, paused: false },
   };
-  return JSON.stringify(file);
+  // Round floats to keep saves small (localStorage quota is ~5 MB for all slots).
+  return JSON.stringify(file, (_k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v));
 }
 
 const num = (v: unknown, d = 0): number => (typeof v === 'number' && isFinite(v) ? v : d);
@@ -70,16 +73,30 @@ export function deserializeGame(json: string): { state: GameState; meta: SaveFil
   if (!Array.isArray(st.units) || !Array.isArray(st.factionOrder)) return null;
   const units = new Map<number, Unit>();
   let maxId = 0;
-  for (const u of st.units) {
-    if (!u || typeof u.id !== 'number' || !UNIT_MAP[u.type] || !st.factions[u.owner]) continue;
-    if (!isFinite(u.x) || !isFinite(u.y)) continue;
+  const valid = (u: Unit): boolean => {
+    if (!u || typeof u.id !== 'number' || !UNIT_MAP[u.type] || !st.factions[u.owner]) return false;
+    if (!isFinite(u.x) || !isFinite(u.y)) return false;
     u.hp = Math.max(1, num(u.hp, 1));
     u.maxHp = Math.max(1, num(u.maxHp, u.hp));
     u.dead = false;
     u.pathPending = false;
+    u.detBy = Array.isArray(u.detBy) ? u.detBy : [];
+    u.bonus = num(u.bonus, 1);
+    u.bonusUntil = num(u.bonusUntil, 0);
     if (u.path && !Array.isArray(u.path)) u.path = null;
-    units.set(u.id, u);
     maxId = Math.max(maxId, u.id);
+    return true;
+  };
+  for (const u of st.units) {
+    if (!valid(u)) continue;
+    if (Array.isArray(u.cargo)) {
+      u.cargo = u.cargo.filter(valid);
+      for (const c of u.cargo) {
+        c.order = null;
+        c.path = null;
+      }
+    } else delete u.cargo;
+    units.set(u.id, u);
   }
   for (const c of st.cities) {
     c.hp = num(c.hp, 0);
@@ -99,6 +116,10 @@ export function deserializeGame(json: string): { state: GameState; meta: SaveFil
     ai: st.ai && typeof st.ai === 'object' ? st.ai : {},
     relations: st.relations ?? {},
     eventTimer: num(st.eventTimer, 60),
+    ops: Array.isArray(st.ops) ? st.ops : [],
+    nextOpId: num(st.nextOpId, 1),
+    peaceOffers: Array.isArray(st.peaceOffers) ? st.peaceOffers : [],
+    warStarted: st.warStarted && typeof st.warStarted === 'object' ? st.warStarted : {},
   };
   return { state, meta: data.meta };
 }

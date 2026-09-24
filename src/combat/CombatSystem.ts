@@ -4,7 +4,8 @@ import type { City, FactionId, Projectile, ProjectileKind, Unit, UnitDef } from 
 import { COLS, ROWS, CELL, worldToCell } from '../config';
 import { unitDef } from '../data/units';
 import { TERRAIN_COVER } from '../map/WorldGeo';
-import { atWar } from '../core/GameState';
+import { atWar, hasWars } from '../core/GameState';
+import { NEUTRAL_ID } from '../data/factions';
 import type { Sim } from '../core/Simulation';
 
 const N = COLS * ROWS;
@@ -28,31 +29,59 @@ const SPEED: Record<ProjectileKind, number> = {
 };
 
 export class CombatSystem {
-  readonly visMask = new Uint16Array(N);
+  /** Player's current vision (fog of war). AI factions are not fog-limited except for stealth. */
+  readonly playerVis = new Uint8Array(N);
   projectiles: Projectile[] = [];
   private projSeq = 1;
   private visTimer = 0;
   private detTimer = 0;
   private discCache = new Map<number, Int16Array>();
   private tmp: Unit[] = [];
+  /** Insurgents exist somewhere (they are hostile to everyone). */
+  private insurgents = false;
+  private cityBuckets: Map<number, City[]> | null = null;
+
+  /** Cities bucketed on a coarse grid for fast proximity queries. */
+  citiesNear(x: number, y: number, r: number, fn: (c: City) => void): void {
+    const B = 256;
+    if (!this.cityBuckets) {
+      this.cityBuckets = new Map();
+      for (const c of this.sim.state.cities) {
+        const k = Math.floor(c.x / B) * 1000 + Math.floor(c.y / B);
+        let list = this.cityBuckets.get(k);
+        if (!list) this.cityBuckets.set(k, (list = []));
+        list.push(c);
+      }
+    }
+    const x0 = Math.floor((x - r) / B);
+    const x1 = Math.floor((x + r) / B);
+    const y0 = Math.floor((y - r) / B);
+    const y1 = Math.floor((y + r) / B);
+    for (let bx = x0; bx <= x1; bx++) {
+      for (let by = y0; by <= y1; by++) {
+        const list = this.cityBuckets.get(bx * 1000 + by);
+        if (list) for (const c of list) fn(c);
+      }
+    }
+  }
+
+  /** Can this faction have any enemy at all right now? */
+  private fighting(f: FactionId): boolean {
+    return this.insurgents || f === NEUTRAL_ID || hasWars(this.sim.state, f);
+  }
 
   constructor(private sim: Sim) {}
 
-  bit(f: FactionId): number {
-    const fs = this.sim.state.factions[f];
-    return fs ? 1 << fs.index : 0;
-  }
-
   canSee(faction: FactionId, u: Unit): boolean {
     if (u.owner === faction) return true;
-    const b = this.bit(faction);
-    if (!(this.visMask[worldToCell(u.x, u.y)] & b)) return false;
-    if (unitDef(u.type).stealth && !(u.detMask & b)) return false;
+    const hidden = unitDef(u.type).stealth && u.revealed <= 0 && !u.detBy.includes(faction);
+    if (hidden) return false;
+    if (faction === this.sim.state.player) return this.playerVis[worldToCell(u.x, u.y)] === 1;
     return true;
   }
 
   cellVisible(faction: FactionId, cell: number): boolean {
-    return (this.visMask[cell] & this.bit(faction)) !== 0;
+    return faction === this.sim.state.player ? this.playerVis[cell] === 1 : true;
   }
 
   // ---------------------------------------------------------------- visibility
@@ -68,56 +97,58 @@ export class CombatSystem {
     return d;
   }
 
-  private mark(x: number, y: number, radius: number, bit: number): void {
+  private mark(x: number, y: number, radius: number): void {
     const r = Math.max(1, Math.round(radius / CELL));
     const cx = Math.floor(x / CELL);
     const cy = Math.floor(y / CELL);
     const d = this.disc(r);
-    const vm = this.visMask;
+    const vm = this.playerVis;
     for (let i = 0; i < d.length; i += 2) {
       const nx = cx + d[i];
       const ny = cy + d[i + 1];
       if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-      vm[ny * COLS + nx] |= bit;
+      vm[ny * COLS + nx] = 1;
     }
   }
 
   updateVisibility(): void {
     const s = this.sim.state;
-    this.visMask.fill(0);
+    const p = s.player;
+    this.playerVis.fill(0);
     for (const u of s.units.values()) {
-      if (u.dead) continue;
-      this.mark(u.x, u.y, this.sim.tech.stats(u.owner, u.type).detection, this.bit(u.owner));
+      if (u.dead || u.owner !== p) continue;
+      this.mark(u.x, u.y, this.sim.tech.stats(u.owner, u.type).detection);
     }
     for (const c of s.cities) {
-      this.mark(c.x, c.y, 150 + c.size * 15 + (c.buildings.radar ?? 0) * 70, this.bit(c.owner));
+      if (c.owner !== p) continue;
+      this.mark(c.x, c.y, 150 + c.size * 15 + (c.buildings.radar ?? 0) * 70);
     }
   }
 
   private updateDetection(): void {
     const s = this.sim.state;
+    this.insurgents = s.cities.some((c) => c.owner === NEUTRAL_ID);
     for (const u of s.units.values()) {
+      if (u.owner === NEUTRAL_ID) this.insurgents = true;
       const def = unitDef(u.type);
       if (!def.stealth || u.dead) continue;
-      let mask = 0;
-      const cell = worldToCell(u.x, u.y);
-      if (u.revealed > 0) mask |= this.visMask[cell];
+      const found = new Set<string>();
       const stealth = this.sim.tech.getMods(u.owner).stealth;
       this.sim.spatial.forEachInRange(u.x, u.y, 380, (o, d2) => {
         if (o.owner === u.owner) return;
         const od = unitDef(o.type);
         if (!od.sonar) return;
         const r = od.sonar * this.sim.tech.getMods(o.owner).sonar * stealth;
-        if (d2 <= r * r) mask |= this.bit(o.owner);
+        if (d2 <= r * r) found.add(o.owner);
       });
-      for (const c of s.cities) {
-        if (!c.port || c.owner === u.owner) continue;
+      this.citiesNear(u.x, u.y, 340, (c) => {
+        if (!c.port || c.owner === u.owner) return;
         const r = (60 + (c.buildings.radar ?? 0) * 90) * stealth;
         const dx = c.x - u.x;
         const dy = c.y - u.y;
-        if (dx * dx + dy * dy <= r * r) mask |= this.bit(c.owner);
-      }
-      u.detMask = mask & ~this.bit(u.owner);
+        if (dx * dx + dy * dy <= r * r) found.add(c.owner);
+      });
+      u.detBy = [...found];
     }
   }
 
@@ -172,8 +203,13 @@ export class CombatSystem {
       }
       return;
     }
-    const st = this.sim.tech.stats(u.owner, u.type);
     const o = u.order;
+    if (!this.fighting(u.owner)) {
+      u.targetUnit = -1;
+      u.targetCity = -1;
+      return;
+    }
+    const st = this.sim.tech.stats(u.owner, u.type);
     if (o && o.kind === 'attack' && o.targetUnit !== undefined) return; // fixed target
     const extra = !o || o.kind === 'attackMove' ? 90 : 0;
     const searchR = st.range + extra;
@@ -201,8 +237,8 @@ export class CombatSystem {
     u.targetCity = -1;
     if (!best && (def.vs.city ?? 0) > 0) {
       let bestD = (st.range + 10) * (st.range + 10);
-      for (const c of s.cities) {
-        if (c.hp <= 0 || !atWar(s, u.owner, c.owner)) continue;
+      this.citiesNear(u.x, u.y, st.range + 10, (c) => {
+        if (c.hp <= 0 || !atWar(s, u.owner, c.owner)) return;
         const dx = c.x - u.x;
         const dy = c.y - u.y;
         const d2 = dx * dx + dy * dy;
@@ -210,7 +246,7 @@ export class CombatSystem {
           bestD = d2;
           u.targetCity = c.id;
         }
-      }
+      });
     }
   }
 
@@ -240,10 +276,12 @@ export class CombatSystem {
     }
   }
 
-  private attackMult(owner: FactionId, rank: number): number {
+  private attackMult(owner: FactionId, rank: number, u?: Unit): number {
     let m = 1 + rank * 0.1;
     const fs = this.sim.state.factions[owner];
     if (fs) for (const e of fs.effects) m *= e.mods.attackMult ?? 1;
+    // Prepared offensives (staging + preparation) hit harder for a while.
+    if (u && u.bonus > 1 && this.sim.state.time < u.bonusUntil) m *= u.bonus;
     return m;
   }
 
@@ -255,7 +293,7 @@ export class CombatSystem {
     if (def.stealth) u.revealed = 5;
     const p = this.makeProjectile(def.projectile, u.owner, u.x, u.y, tx, ty, targetUnit, targetCity);
     p.src = u.id;
-    p.attack = attack * this.attackMult(u.owner, u.rank);
+    p.attack = attack * this.attackMult(u.owner, u.rank, u);
     p.vs = def.vs;
     p.splash = def.splash ?? 0;
     if (def.projectile === 'air') this.rollIntercept(p, 0.5);

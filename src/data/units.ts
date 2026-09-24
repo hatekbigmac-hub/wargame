@@ -104,6 +104,14 @@ export const UNIT_DEFS: UnitDef[] = [
     projectile: 'bullet', sprite: 'n_patrol', size: 30, needsPort: true, sonar: 200,
   },
   {
+    id: 'transport', name: 'Transport Ship', short: 'TRN', domain: 'naval', cls: 'ship', role: 'Troop transport',
+    desc: 'Carries up to 6 land units (infantry, tanks, artillery) across the sea. Board: select troops and right-click the transport. Unload: select the transport and right-click a coast.',
+    hp: 170, attack: 0, defense: 8, speed: 60, range: 0, reload: 99, detection: 260,
+    vs: {},
+    cost: { money: 220, metal: 60, fuel: 20 }, time: 11, upkeep: { money: 1, fuel: 0.4 },
+    projectile: 'bullet', sprite: 'n_transport', size: 40, needsPort: true, capacity: 6, abilities: ['transport'],
+  },
+  {
     id: 'frigate', name: 'Frigate', short: 'FFG', domain: 'naval', cls: 'ship', role: 'Escort / air defence',
     desc: 'Escort ship with strong missile defence and anti-submarine sonar.',
     hp: 220, attack: 16, defense: 14, speed: 66, range: 150, reload: 1.5, detection: 320,
@@ -176,5 +184,5 @@ export function unitDef(id: string): UnitDef {
 
 export const PRODUCIBLE_UNITS = UNIT_DEFS.filter((u) => !u.future);
 
-/** Speed of land units while embarked on transports. */
+/** Legacy constant (land units no longer embark on their own). */
 export const EMBARK_SPEED = 34;

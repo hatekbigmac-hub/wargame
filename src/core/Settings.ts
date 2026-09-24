@@ -1,6 +1,7 @@
 // Persistent player settings (localStorage, fail-safe).
 import { SAVE_PREFIX } from '../config';
 import type { Difficulty } from './types';
+import { setLang, type Lang } from '../i18n';
 
 export interface SettingsData {
   master: number;
@@ -14,6 +15,7 @@ export interface SettingsData {
   showFps: boolean;
   difficulty: Difficulty;
   autosave: boolean;
+  lang: Lang;
 }
 
 const DEFAULTS: SettingsData = {
@@ -28,6 +30,7 @@ const DEFAULTS: SettingsData = {
   showFps: false,
   difficulty: 'normal',
   autosave: true,
+  lang: 'en',
 };
 
 const KEY = `${SAVE_PREFIX}.settings`;
@@ -44,10 +47,13 @@ class SettingsStore {
     } catch {
       this.data = { ...DEFAULTS };
     }
+    if (this.data.lang !== 'en' && this.data.lang !== 'ru') this.data.lang = 'en';
+    setLang(this.data.lang);
   }
 
   set<K extends keyof SettingsData>(key: K, value: SettingsData[K]): void {
     this.data[key] = value;
+    if (key === 'lang') setLang(value as Lang);
     try {
       localStorage.setItem(KEY, JSON.stringify(this.data));
     } catch {

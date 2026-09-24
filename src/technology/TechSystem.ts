@@ -146,8 +146,7 @@ export class TechSystem {
 
   researchSpeed(f: FactionId): number {
     const s = this.sim.state;
-    let labs = 0;
-    for (const c of s.cities) if (c.owner === f) labs += c.buildings.research_lab ?? 0;
+    const labs = this.sim.econ?.labs.get(f) ?? 0;
     let mult = this.getMods(f).research * (1 + labs * 0.15);
     for (const e of s.factions[f].effects) mult *= e.mods.researchMult ?? 1;
     const fs = s.factions[f];

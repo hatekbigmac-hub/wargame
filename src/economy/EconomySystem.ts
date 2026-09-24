@@ -50,69 +50,77 @@ export class EconomySystem {
     }
   }
 
-  /** Recompute income figures without changing stockpiles. */
+  /** Research labs per faction (cached each economy tick). */
+  labs = new Map<FactionId, number>();
+
+  /** Recompute income figures without changing stockpiles (single pass over cities and units). */
   recalc(): void {
     const s = this.sim.state;
-    for (const id of s.factionOrder) this.compute(id);
-  }
-
-  private compute(id: FactionId): void {
-    const s = this.sim.state;
-    const fs = s.factions[id];
-    const mods = this.sim.tech.getMods(id);
-    const gross = emptyRes();
-    let supply = 0;
-    let demand = 0;
-    let industry = 0;
+    type Agg = { gross: Resources; upkeep: Resources; supply: number; demand: number; industry: number; labs: number };
+    const agg = new Map<FactionId, Agg>();
+    const get = (f: FactionId) => {
+      let a = agg.get(f);
+      if (!a) agg.set(f, (a = { gross: emptyRes(), upkeep: emptyRes(), supply: 0, demand: 0, industry: 0, labs: 0 }));
+      return a;
+    };
     for (const c of s.cities) {
-      if (c.owner !== id) continue;
+      const a = get(c.owner);
       const y = cityYield(c);
-      for (const k of RES_KEYS) gross[k] += y.res[k];
-      supply += y.powerSupply;
-      demand += y.powerDemand;
-      industry += y.industry;
+      for (const k of RES_KEYS) a.gross[k] += y.res[k];
+      a.supply += y.powerSupply;
+      a.demand += y.powerDemand;
+      a.industry += y.industry;
+      a.labs += c.buildings.research_lab ?? 0;
     }
-    const bonus = this.sim.aiBonus(id);
-    for (const k of RES_KEYS) {
-      let m = mods.econ[k] * bonus;
-      for (const e of fs.effects) m *= e.mods.resMult?.[k] ?? 1;
-      gross[k] *= m;
-    }
-    let powerMult = mods.econ.power;
-    for (const e of fs.effects) powerMult *= e.mods.powerMult ?? 1;
-    supply *= powerMult;
-    const upkeep = emptyRes();
+    const addUpkeep = (owner: FactionId, type: string) => {
+      const a = get(owner);
+      const m = this.sim.tech.getMods(owner).upkeep;
+      for (const [k, v] of Object.entries(unitDef(type).upkeep)) a.upkeep[k as ResKey] += (v as number) * m;
+    };
     for (const u of s.units.values()) {
-      if (u.owner !== id) continue;
-      const def = unitDef(u.type);
-      for (const [k, v] of Object.entries(def.upkeep)) upkeep[k as ResKey] += (v as number) * mods.upkeep;
+      addUpkeep(u.owner, u.type);
+      if (u.cargo) for (const c of u.cargo) addUpkeep(c.owner, c.type);
     }
-    fs.gross = gross;
-    fs.upkeep = upkeep;
-    for (const k of RES_KEYS) fs.income[k] = gross[k] - upkeep[k];
-    fs.power.supply = supply;
-    fs.power.demand = demand;
-    fs.industry = industry;
+    for (const id of s.factionOrder) {
+      const fs = s.factions[id];
+      const a = get(id);
+      const mods = this.sim.tech.getMods(id);
+      const bonus = this.sim.aiBonus(id);
+      for (const k of RES_KEYS) {
+        let m = mods.econ[k] * bonus;
+        for (const e of fs.effects) m *= e.mods.resMult?.[k] ?? 1;
+        a.gross[k] *= m;
+      }
+      let powerMult = mods.econ.power;
+      for (const e of fs.effects) powerMult *= e.mods.powerMult ?? 1;
+      fs.gross = a.gross;
+      fs.upkeep = a.upkeep;
+      for (const k of RES_KEYS) fs.income[k] = a.gross[k] - a.upkeep[k];
+      fs.power.supply = a.supply * powerMult;
+      fs.power.demand = a.demand;
+      fs.industry = a.industry;
+      this.labs.set(id, a.labs);
+    }
   }
 
   private tick(hours: number): void {
     const s = this.sim.state;
+    this.recalc();
+    let starvingFactions: Set<FactionId> | null = null;
     for (const id of s.factionOrder) {
       const fs = s.factions[id];
       if (!fs.alive) continue;
-      this.compute(id);
       for (const k of RES_KEYS) {
         fs.res[k] += fs.income[k] * hours;
         if (fs.res[k] < 0) fs.res[k] = 0;
       }
-      // Timed effects from world events.
       for (const e of fs.effects) e.remaining -= hours;
       if (fs.effects.some((e) => e.remaining <= 0)) fs.effects = fs.effects.filter((e) => e.remaining > 0);
-      // Starvation hurts infantry.
-      if (fs.res.food <= 0 && fs.income.food < 0) {
-        for (const u of s.units.values()) {
-          if (u.owner === id && unitDef(u.type).cls === 'infantry' && u.hp > u.maxHp * 0.3) u.hp -= 1.5 * hours;
-        }
+      if (fs.res.food <= 0 && fs.income.food < 0) (starvingFactions ??= new Set()).add(id);
+    }
+    if (starvingFactions) {
+      for (const u of s.units.values()) {
+        if (starvingFactions.has(u.owner) && unitDef(u.type).cls === 'infantry' && u.hp > u.maxHp * 0.3) u.hp -= 1.5 * hours;
       }
     }
   }

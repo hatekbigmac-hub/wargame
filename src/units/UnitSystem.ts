@@ -1,8 +1,8 @@
 // Unit lifecycle, orders and movement.
 import type { City, FactionId, Order, Unit } from '../core/types';
-import { unitDef, EMBARK_SPEED } from '../data/units';
+import { unitDef } from '../data/units';
 import { TERRAIN_SPEED } from '../map/WorldGeo';
-import { worldToCell, cellCenterX, cellCenterY, WORLD_W, WORLD_H } from '../config';
+import { worldToCell, cellCenterX, cellCenterY, WORLD_W, WORLD_H, CELL, COLS, ROWS } from '../config';
 import type { Sim } from '../core/Simulation';
 import { atWar } from '../core/GameState';
 import type { PathDomain } from '../map/Pathfinding';
@@ -50,7 +50,9 @@ export class UnitSystem {
       embarked: false,
       moving: false,
       revealed: 0,
-      detMask: 0,
+      detBy: [],
+      bonus: 1,
+      bonusUntil: 0,
       anchorX: x,
       anchorY: y,
       lastHit: -99,
@@ -58,7 +60,7 @@ export class UnitSystem {
       dead: false,
     };
     u.turret = u.angle;
-    u.embarked = def.domain === 'land' && !this.sim.geo.land[worldToCell(u.x, u.y)];
+    u.embarked = false;
     s.units.set(u.id, u);
     this.sim.bus.emit('unitCreated', { unit: u });
     return u;
@@ -69,7 +71,100 @@ export class UnitSystem {
     u.dead = true;
     this.sim.state.units.delete(u.id);
     this.sim.paths.cancel(u.id);
+    if (u.cargo?.length) {
+      // Troops aboard a sunk transport are lost with it.
+      const fs = this.sim.state.factions[u.owner];
+      for (const c of u.cargo) {
+        c.dead = true;
+        if (killed && fs) fs.stats.lost++;
+      }
+      if (killed && u.owner === this.sim.state.player) this.sim.notify(`Transport sunk with ${u.cargo.length} units aboard!`, 'bad', u.x, u.y);
+      u.cargo = [];
+    }
     this.sim.bus.emit('unitRemoved', { unit: u, killed, by });
+  }
+
+  /** Find a unit on the map or aboard a transport. */
+  find(id: number): Unit | undefined {
+    const u = this.sim.state.units.get(id);
+    if (u) return u;
+    for (const t of this.sim.state.units.values()) if (t.cargo) for (const c of t.cargo) if (c.id === id) return c;
+    return undefined;
+  }
+
+  capacityOf(t: Unit): number {
+    return unitDef(t.type).capacity ?? 0;
+  }
+
+  /** Land units walk to the coast next to the transport and embark. */
+  orderBoard(units: Unit[], transport: Unit): number {
+    let n = 0;
+    for (const u of units) {
+      if (this.domainOf(u) !== 'land' || u.owner !== transport.owner) continue;
+      this.setOrder(u, { kind: 'board', x: transport.x, y: transport.y, targetUnit: transport.id });
+      n++;
+    }
+    return n;
+  }
+
+  /** Transport sails to the coast nearest (x, y) and lands its troops there. */
+  orderUnload(t: Unit, x: number, y: number): void {
+    this.setOrder(t, { kind: 'unload', x, y });
+    const land = this.sim.geo.nearestCell(x, y, 3, (c) => this.sim.geo.land[c] === 1);
+    const tx = land >= 0 ? cellCenterX(land) : x;
+    const ty = land >= 0 ? cellCenterY(land) : y;
+    this.requestPath(t, tx, ty);
+  }
+
+  private board(u: Unit, t: Unit): boolean {
+    t.cargo ??= [];
+    if (t.cargo.length >= this.capacityOf(t)) return false;
+    this.setOrder(u, null);
+    this.sim.state.units.delete(u.id);
+    this.sim.paths.cancel(u.id);
+    t.cargo.push(u);
+    this.sim.bus.emit('unitRemoved', { unit: u, killed: false, by: null });
+    this.sim.bus.emit('unitBoarded', { unit: u, transport: t });
+    return true;
+  }
+
+  /** Put all cargo ashore on land cells near the transport. Returns units landed. */
+  unloadNow(t: Unit, destX?: number, destY?: number): number {
+    const geo = this.sim.geo;
+    if (!t.cargo?.length) return 0;
+    const spots: number[] = [];
+    for (let r = 1; r <= 3 && spots.length < t.cargo.length; r++) {
+      const cx = Math.floor(t.x / CELL);
+      const cy = Math.floor(t.y / CELL);
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        const c = ny * COLS + nx;
+        if (geo.land[c] && !spots.includes(c)) spots.push(c);
+      }
+    }
+    if (!spots.length) return 0;
+    const landed = t.cargo.splice(0);
+    landed.forEach((u, i) => {
+      const c = spots[i % spots.length];
+      u.x = cellCenterX(c) + ((i * 7) % 9) - 4;
+      u.y = cellCenterY(c) + ((i * 5) % 9) - 4;
+      u.order = null;
+      u.path = null;
+      u.pathPending = false;
+      u.moving = false;
+      u.anchorX = u.x;
+      u.anchorY = u.y;
+      u.dead = false;
+      this.sim.state.units.set(u.id, u);
+      this.sim.bus.emit('unitCreated', { unit: u });
+      this.sim.bus.emit('unitUnloaded', { unit: u, transport: t });
+    });
+    if (destX !== undefined && destY !== undefined && geo.landConnected(landed[0].x, landed[0].y, destX, destY)) {
+      this.orderMove(landed, destX, destY, true);
+    }
+    return landed.length;
   }
 
   domainOf(u: Unit): PathDomain {
@@ -187,7 +282,10 @@ export class UnitSystem {
             u.order = null;
             u.anchorX = u.x;
             u.anchorY = u.y;
-            if (u.owner === this.sim.state.player) this.sim.notifyOnce('noroute', 'No route to destination', 'warn');
+            if (u.owner === this.sim.state.player) {
+              const land = this.domainOf(u) === 'land';
+              this.sim.notifyOnce('noroute', land ? 'No land route — load troops onto a Transport Ship to cross the sea' : 'No sea route to that destination', 'warn');
+            }
           }
           return;
         }
@@ -266,6 +364,49 @@ export class UnitSystem {
             }
             break;
           }
+          case 'board': {
+            halt = true;
+            const t = o.targetUnit !== undefined ? s.units.get(o.targetUnit) : undefined;
+            if (!t || t.dead || t.owner !== u.owner) {
+              this.setOrder(u, null);
+              break;
+            }
+            const d = Math.hypot(t.x - u.x, t.y - u.y);
+            if (d <= 46) {
+              if (!this.board(u, t)) {
+                this.setOrder(u, null);
+                if (u.owner === s.player) sim.notifyOnce('full', 'Transport is full (6 units)', 'warn');
+              }
+              break;
+            }
+            if (!u.pathPending && (!u.path || s.time >= u.repathAt)) {
+              u.repathAt = s.time + 3;
+              const shore = sim.geo.nearestCell(t.x, t.y, 3, (c) => sim.geo.land[c] === 1 && sim.geo.landConnected(u.x, u.y, cellCenterX(c), cellCenterY(c)));
+              if (shore < 0) {
+                if (u.owner === s.player) sim.notifyOnce('shore', 'Move the transport next to a coast your troops can reach', 'warn');
+              } else if (Math.hypot(cellCenterX(shore) - u.x, cellCenterY(shore) - u.y) > 6) {
+                this.requestPath(u, cellCenterX(shore), cellCenterY(shore));
+              }
+            }
+            if (u.path) halt = false;
+            break;
+          }
+          case 'unload': {
+            if (!u.cargo?.length) {
+              this.setOrder(u, null);
+              halt = true;
+              break;
+            }
+            if (!u.path && !u.pathPending) {
+              const n = this.unloadNow(u, o.x, o.y);
+              if (!n && u.owner === s.player) sim.notifyOnce('beach', 'No beach here — move the transport next to land', 'warn');
+              this.setOrder(u, null);
+              u.anchorX = u.x;
+              u.anchorY = u.y;
+              halt = true;
+            }
+            break;
+          }
           case 'hold':
             halt = true;
             break;
@@ -298,10 +439,7 @@ export class UnitSystem {
       if (!halt && u.path) this.advance(u, dt, st.speed, def.domain === 'naval', def.cls);
       else u.moving = false;
 
-      // Land units that stop in the shallows step back ashore so they can fight and capture.
-      if (def.domain === 'land' && !u.moving && u.embarked) this.wadeAshore(u, dt);
-
-      if (def.domain === 'land') u.embarked = !sim.geo.land[worldToCell(u.x, u.y)];
+      u.embarked = false;
     }
 
     this.sepTimer -= dt;
@@ -350,10 +488,7 @@ export class UnitSystem {
       return;
     }
     let speed = baseSpeed;
-    if (!naval) {
-      if (u.embarked) speed = EMBARK_SPEED * (baseSpeed / unitDef(u.type).speed);
-      else speed *= TERRAIN_SPEED[sim.geo.terrain[worldToCell(u.x, u.y)]];
-    }
+    if (!naval) speed *= TERRAIN_SPEED[sim.geo.terrain[worldToCell(u.x, u.y)]];
     const fs = sim.state.factions[u.owner];
     if (fs) {
       if ((naval || cls === 'armor') && fs.res.fuel <= 0 && fs.income.fuel < 0) speed *= 0.5;
@@ -418,7 +553,7 @@ export class UnitSystem {
       const nx = u.x + Math.max(-6, Math.min(6, px));
       const ny = u.y + Math.max(-6, Math.min(6, py));
       const c = worldToCell(nx, ny);
-      if (naval ? !geo.isNavigable(c) : geo.land[c] !== geo.land[worldToCell(u.x, u.y)]) continue;
+      if (naval ? !geo.isNavigable(c) : !geo.isLandPassable(c)) continue;
       u.x = Math.max(4, Math.min(WORLD_W - 4, nx));
       u.y = Math.max(4, Math.min(WORLD_H - 4, ny));
       if (!u.order) {

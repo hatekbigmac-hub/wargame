@@ -61,6 +61,7 @@ export interface UnitDef {
   stationaryFire?: boolean;
   minRange?: number;
   captureRate?: number;
+  capacity?: number;
   future?: boolean;
 }
 
@@ -105,19 +106,25 @@ export interface TechDef {
 export interface FactionDef {
   id: FactionId;
   name: string;
+  ru: string;
   short: string;
   color: number;
   css: string;
   capital: string;
-  desc: string;
-  motto: string;
-  difficulty: string;
+  continent: string;
+  population: number;
+  gdp: number;
+  neighbors: string[];
+  labelLon: number;
+  labelLat: number;
+  power: number;
   personality: { aggression: number; naval: number; tech: number; defense: number };
   startingResources: Resources;
 }
 
 export interface CityDef {
   name: string;
+  ru: string;
   lon: number;
   lat: number;
   owner: FactionId;
@@ -132,7 +139,7 @@ export interface CityDef {
 
 // ---------------------------------------------------------------- state
 
-export type OrderKind = 'move' | 'attack' | 'attackMove' | 'hold';
+export type OrderKind = 'move' | 'attack' | 'attackMove' | 'hold' | 'board' | 'unload';
 
 export interface Order {
   kind: OrderKind;
@@ -170,7 +177,13 @@ export interface Unit {
   embarked: boolean;
   moving: boolean;
   revealed: number;
-  detMask: number;
+  /** Factions currently detecting this (stealth) unit. */
+  detBy: string[];
+  /** Land units carried by a transport. */
+  cargo?: Unit[];
+  /** Offensive preparation bonus (attack multiplier) and its expiry time. */
+  bonus: number;
+  bonusUntil: number;
   anchorX: number;
   anchorY: number;
   lastHit: number;
@@ -189,6 +202,8 @@ export interface ProdItem {
 export interface City {
   id: number;
   name: string;
+  ru: string;
+  country: string;
   x: number;
   y: number;
   cell: number;
@@ -275,7 +290,19 @@ export interface AIOperation {
   targetCity: number;
   units: number[];
   started: number;
-  kind: 'attack' | 'defend';
+  kind: 'attack' | 'defend' | 'amphibious';
+  phase?: 'gather' | 'board' | 'sail' | 'land';
+  transport?: number;
+  port?: number;
+}
+
+export interface WarPlan {
+  target: FactionId;
+  phase: 'mobilize' | 'war';
+  started: number;
+  stageCity: number;
+  targetCity: number;
+  prep: number;
 }
 
 export interface AIState {
@@ -285,6 +312,24 @@ export interface AIState {
   lastNaval: number;
   mood: number;
   plan?: { unit: string; city: number } | null;
+  war?: WarPlan | null;
+  nextWarCheck?: number;
+}
+
+export interface PlayerOp {
+  id: number;
+  units: number[];
+  targetCity: number;
+  stageX: number;
+  stageY: number;
+  prep: number;
+  created: number;
+  ready?: boolean;
+}
+
+export interface PeaceOffer {
+  from: FactionId;
+  t: number;
 }
 
 export interface GameState {
@@ -304,6 +349,10 @@ export interface GameState {
   gameOver: null | { winner: FactionId | null; playerWon: boolean };
   eventTimer: number;
   ai: Record<FactionId, AIState>;
+  ops: PlayerOp[];
+  nextOpId: number;
+  peaceOffers: PeaceOffer[];
+  warStarted: Record<string, number>;
 }
 
 export interface Projectile {
@@ -350,4 +399,10 @@ export interface GameEvents {
   notify: { text: string; kind: LogEntry['kind']; x?: number; y?: number; faction?: FactionId };
   gameOver: { playerWon: boolean; winner: FactionId | null };
   selectionChanged: { units: number[]; city: number };
+  warDeclared: { attacker: FactionId; defender: FactionId };
+  peaceSigned: { a: FactionId; b: FactionId };
+  mobilization: { faction: FactionId; target: FactionId; city: City | null };
+  unitBoarded: { unit: Unit; transport: Unit };
+  unitUnloaded: { unit: Unit; transport: Unit };
+  offensiveLaunched: { op: PlayerOp; city: City };
 }

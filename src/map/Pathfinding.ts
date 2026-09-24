@@ -33,12 +33,20 @@ export class Pathfinder {
   constructor(private geo: WorldGeo) {}
 
   passable(domain: PathDomain, cell: number): boolean {
-    return domain === 'land' ? true : this.geo.isNavigable(cell);
+    return domain === 'land' ? this.geo.isLandPassable(cell) : this.geo.isNavigable(cell);
   }
 
   cost(domain: PathDomain, cell: number): number {
     if (domain === 'naval') return 1;
     return TERRAIN_COST[this.geo.terrain[cell]];
+  }
+
+  /** Can a unit of this domain get from a to b at all? (cheap connectivity check) */
+  reachable(domain: PathDomain, ax: number, ay: number, bx: number, by: number): boolean {
+    const a = this.snap(domain, ax, ay, 3);
+    const b = this.snap(domain, bx, by, 6);
+    if (!a || !b) return false;
+    return domain === 'land' ? this.geo.landComp[a.cell] === this.geo.landComp[b.cell] : this.geo.waterBody[a.cell] === this.geo.waterBody[b.cell];
   }
 
   /** Snap a point to the nearest passable cell for the domain. */
@@ -56,17 +64,12 @@ export class Pathfinder {
     const steps = Math.max(1, Math.ceil(dist / (CELL * 0.4)));
     const c0 = worldToCell(ax, ay);
     const c1 = worldToCell(bx, by);
-    const land0 = this.geo.land[c0];
-    const land1 = this.geo.land[c1];
-    if (domain === 'land' && land0 !== land1) return false;
+    if (!this.passable(domain, c1)) return false;
     const maxCost = Math.max(this.cost(domain, c0), this.cost(domain, c1)) * 1.3 + 0.01;
     for (let i = 1; i < steps; i++) {
       const c = worldToCell(ax + ((bx - ax) * i) / steps, ay + ((by - ay) * i) / steps);
       if (!this.passable(domain, c)) return false;
-      if (domain === 'land') {
-        if (this.geo.land[c] !== land0) return false;
-        if (this.cost(domain, c) > maxCost) return false;
-      }
+      if (domain === 'land' && this.cost(domain, c) > maxCost) return false;
     }
     return true;
   }
@@ -79,6 +82,9 @@ export class Pathfinder {
     if (!start || !goal) return null;
     const s = start.cell;
     const t = goal.cell;
+    // Different landmass / sea: unreachable without transport, fail fast.
+    if (domain === 'land' && this.geo.landComp[s] !== this.geo.landComp[t]) return null;
+    if (domain === 'naval' && this.geo.waterBody[s] !== this.geo.waterBody[t]) return null;
     const gx = t % COLS;
     const gy = (t / COLS) | 0;
     if (s === t) return [goal.x, goal.y];
@@ -97,8 +103,8 @@ export class Pathfinder {
     const came = this.came;
     const stamp = this.stamp;
     const closed = this.closed;
-    const land = this.geo.land;
     const naval = domain === 'naval';
+    const geo = this.geo;
     const h = (c: number) => {
       const dx = Math.abs((c % COLS) - gx);
       const dy = Math.abs(((c / COLS) | 0) - gy);
@@ -122,7 +128,6 @@ export class Pathfinder {
       const cx = c % COLS;
       const cy = (c / COLS) | 0;
       const gc = gArr[c];
-      const landC = land[c];
       for (let dy = -1; dy <= 1; dy++) {
         const ny = cy + dy;
         if (ny < 0 || ny >= ROWS) continue;
@@ -134,11 +139,11 @@ export class Pathfinder {
           if (closed[nc] === gen) continue;
           let step: number;
           if (naval) {
-            if (!this.geo.isNavigable(nc)) continue;
+            if (!geo.isNavigable(nc)) continue;
             step = 1;
           } else {
-            step = TERRAIN_COST[this.geo.terrain[nc]];
-            if (land[nc] !== landC) step += 3; // embark / disembark penalty
+            if (!geo.isLandPassable(nc)) continue;
+            step = TERRAIN_COST[geo.terrain[nc]];
           }
           const ng = gc + step * (dx && dy ? SQRT2 : 1);
           if (stamp[nc] !== gen || ng < gArr[nc]) {

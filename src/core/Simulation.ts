@@ -16,9 +16,11 @@ import { EconomySystem } from '../economy/EconomySystem';
 import { ProductionSystem } from '../production/ProductionSystem';
 import { WorldEventSystem } from '../events/WorldEventSystem';
 import { AISystem } from '../ai/AISystem';
-import { NEUTRAL_ID } from '../data/factions';
+import { NEUTRAL_ID, factionName, powerTier } from '../data/factions';
 import { TECH_MAP } from '../data/techs';
 import { unitDef } from '../data/units';
+import { updateOps } from '../military/Offensives';
+import { t, tn } from '../i18n';
 
 export class Sim {
   readonly bus: EventBus;
@@ -65,32 +67,48 @@ export class Sim {
     return sim;
   }
 
+  /** Starting armies scale with each country's industrial power (≈ 600 units worldwide). */
   private setupInitialForces(): void {
     const s = this.state;
     for (const f of s.factionOrder) {
       const cities = s.cities.filter((c) => c.owner === f);
+      if (!cities.length) continue;
+      const isPlayer = f === s.player;
+      let tier = powerTier(f);
+      if (isPlayer) tier = Math.max(tier, 1);
       const spawnNear = (type: string, x: number, y: number, r = 24) => {
         const a = this.rng.range(0, Math.PI * 2);
         const d = this.rng.range(8, r);
         return this.units.spawn(type, f, x + Math.cos(a) * d, y + Math.sin(a) * d);
       };
-      for (const c of cities) {
-        if (c.size >= 2) spawnNear('infantry', c.x, c.y);
-        if (c.size >= 4) spawnNear('infantry', c.x, c.y);
-      }
       const capital = cities.find((c) => c.capital) ?? cities[0];
-      if (capital) {
-        for (const t of ['medium_tank', 'medium_tank', 'light_tank', 'artillery', 'anti_air', 'infantry']) spawnNear(t, capital.x, capital.y, 36);
-      }
-      cities
-        .filter((c) => !c.capital)
-        .sort((a, b) => b.industry - a.industry)
-        .slice(0, 2)
-        .forEach((c) => spawnNear('light_tank', c.x, c.y));
-      const ports = cities.filter((c) => c.port).sort((a, b) => b.size - a.size || b.industry - a.industry);
-      const fleet = [['destroyer', 'submarine'], ['frigate'], ['patrol_boat'], ['destroyer']];
-      ports.slice(0, 4).forEach((p, i) => {
-        for (const t of fleet[i]) this.units.spawn(t, f, p.portX + this.rng.range(-8, 8), p.portY + this.rng.range(-8, 8));
+      const army = [
+        ['infantry', 'infantry'],
+        ['infantry', 'infantry', 'light_tank', 'artillery'],
+        ['infantry', 'infantry', 'infantry', 'medium_tank', 'light_tank', 'artillery'],
+        ['infantry', 'infantry', 'infantry', 'medium_tank', 'medium_tank', 'light_tank', 'artillery', 'anti_air', 'rocket_artillery'],
+      ][tier];
+      for (const type of army) spawnNear(type, capital.x, capital.y, 36);
+      if (isPlayer) spawnNear('rocket_artillery', capital.x, capital.y, 36);
+      // Garrisons in the larger cities.
+      const others = cities.filter((c) => c !== capital).sort((a, b) => b.size * b.industry - a.size * a.industry);
+      const garrisons = [0, 1, 3, 5][tier];
+      others.slice(0, garrisons).forEach((c, i) => {
+        spawnNear('infantry', c.x, c.y);
+        if (tier === 3 && i < 2) spawnNear('light_tank', c.x, c.y);
+      });
+      // Navies: coastal powers get warships; everyone above micro-state gets a troop transport.
+      const ports = cities.filter((c) => c.port).sort((a, b) => b.size * b.industry - a.size * a.industry);
+      if (!ports.length) continue;
+      const fleet = [
+        [],
+        ['patrol_boat', 'transport'],
+        ['destroyer', 'frigate', 'transport'],
+        ['destroyer', 'destroyer', 'submarine', 'frigate', 'missile_ship', 'transport', 'transport'],
+      ][tier];
+      fleet.forEach((type, i) => {
+        const p = ports[i % Math.min(ports.length, 3)];
+        this.units.spawn(type, f, p.portX + this.rng.range(-10, 10), p.portY + this.rng.range(-10, 10));
       });
     }
   }
@@ -131,6 +149,7 @@ export class Sim {
     this.econ.update(dt);
     this.events.update(dt);
     this.ai.update(dt);
+    updateOps(this, dt);
     this.victoryTimer -= dt;
     if (this.victoryTimer <= 0) {
       this.victoryTimer = 2;
@@ -194,33 +213,50 @@ export class Sim {
 
   private wireLogging(): void {
     const s = this.state;
-    const name = (f: FactionId) => s.factions[f]?.name ?? f;
+    const name = factionName;
     this.bus.on('cityCaptured', ({ city, from, to }) => {
-      if (to === s.player) this.notify(`${city.name} captured!`, 'good', city.x, city.y);
-      else if (from === s.player) this.notify(`${city.name} has fallen to the ${name(to)}`, 'bad', city.x, city.y);
-      else this.log(`${name(to)} captured ${city.name} from ${name(from)}`, 'info', city.x, city.y);
+      if (to === s.player) this.notify(t('{city} captured!', { city: tn(city) }), 'good', city.x, city.y);
+      else if (from === s.player) this.notify(t('{city} has fallen to {name}', { city: tn(city), name: name(to) }), 'bad', city.x, city.y);
+      else this.log(t('{a} captured {city} from {b}', { a: name(to), city: tn(city), b: name(from) }), 'info', city.x, city.y);
     });
     this.bus.on('cityDamaged', ({ city }) => {
-      if (city.owner === s.player) this.notifyOnce(`atk${city.id}`, `${city.name} is under attack!`, 'warn', city.x, city.y, 40);
+      if (city.owner === s.player) this.notifyOnce(`atk${city.id}`, t('{city} is under attack!', { city: tn(city) }), 'warn', city.x, city.y, 40);
     });
     this.bus.on('researchComplete', ({ faction, tech }) => {
-      if (faction === s.player) this.notify(`Research complete: ${TECH_MAP[tech]?.name ?? tech}`, 'good');
+      const def = TECH_MAP[tech];
+      if (faction === s.player) this.notify(t('Research complete: {tech}', { tech: def ? t(def.name) : tech }), 'good');
     });
     this.bus.on('productionComplete', ({ city, item, unit }) => {
       if (city.owner !== s.player) return;
-      const label = item.kind === 'unit' ? unitDef(item.id).name : `${item.id.replace('_', ' ')} upgrade`;
-      this.log(`${city.name}: ${label} ready`, 'info', unit?.x ?? city.x, unit?.y ?? city.y);
+      const label = item.kind === 'unit' ? t(unitDef(item.id).name) : t('{b} upgrade', { b: item.id.replace('_', ' ') });
+      this.log(`${tn(city)}: ${t('{item} ready', { item: label })}`, 'info', unit?.x ?? city.x, unit?.y ?? city.y);
     });
     this.bus.on('worldEvent', ({ faction, title, text, good, city }) => {
-      if (faction === s.player) this.notify(`${title}: ${text}`, good ? 'good' : 'bad', city?.x, city?.y);
-      else this.log(`${name(faction)} — ${title}`, 'info', city?.x, city?.y);
+      if (faction === s.player) this.notify(`${t(title)}: ${t(text)}`, good ? 'good' : 'bad', city?.x, city?.y);
+      else this.log(`${name(faction)} — ${t(title)}`, 'info', city?.x, city?.y);
     });
     this.bus.on('factionEliminated', ({ faction }) => {
-      if (faction !== NEUTRAL_ID) this.notify(`The ${name(faction)} has been eliminated!`, faction === s.player ? 'bad' : 'warn');
+      if (faction !== NEUTRAL_ID) this.notify(t('{name} has been eliminated!', { name: name(faction) }), faction === s.player ? 'bad' : 'warn');
     });
     this.bus.on('unitRemoved', ({ unit, killed }) => {
       if (killed && unit.owner === s.player && unitDef(unit.type).domain === 'naval') {
-        this.notifyOnce('shiplost', `${unitDef(unit.type).name} lost at sea`, 'bad', unit.x, unit.y, 8);
+        this.notifyOnce('shiplost', t('{unit} lost at sea', { unit: t(unitDef(unit.type).name) }), 'bad', unit.x, unit.y, 8);
+      }
+    });
+    this.bus.on('warDeclared', ({ attacker, defender }) => {
+      if (defender === s.player) this.notify(t('{name} has declared WAR on you!', { name: name(attacker) }), 'bad');
+      else if (attacker === s.player) this.notify(t('You declared war on {name}', { name: name(defender) }), 'warn');
+      else this.log(t('{a} declared war on {b}', { a: name(attacker), b: name(defender) }), 'info');
+    });
+    this.bus.on('peaceSigned', ({ a, b }) => {
+      if (a === s.player || b === s.player) this.notify(t('Ceasefire signed with {name}', { name: name(a === s.player ? b : a) }), 'good');
+      else this.log(t('Ceasefire: {a} and {b}', { a: name(a), b: name(b) }), 'info');
+    });
+    this.bus.on('mobilization', ({ faction, target, city }) => {
+      if (target === s.player) {
+        this.notify(t('{name} is MOBILISING troops on your border — war expected within 2 days!', { name: name(faction) }), 'bad', city?.x, city?.y);
+      } else {
+        this.log(t('{a} is mobilising against {b}', { a: name(faction), b: name(target) }), 'info', city?.x, city?.y);
       }
     });
   }

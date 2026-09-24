@@ -11,10 +11,47 @@ export function relKey(a: FactionId, b: FactionId): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
+// War lookups are hot (combat targeting), so relations are indexed per faction.
+// Anything that changes state.relations must call invalidateWars().
+let warState: GameState | null = null;
+let warIndex: Map<FactionId, Set<FactionId>> | null = null;
+
+export function invalidateWars(): void {
+  warIndex = null;
+}
+
+function wars(state: GameState): Map<FactionId, Set<FactionId>> {
+  if (warIndex && warState === state) return warIndex;
+  const m = new Map<FactionId, Set<FactionId>>();
+  for (const [k, v] of Object.entries(state.relations)) {
+    if (v !== 'war') continue;
+    const [a, b] = k.split('|');
+    if (!m.has(a)) m.set(a, new Set());
+    if (!m.has(b)) m.set(b, new Set());
+    m.get(a)!.add(b);
+    m.get(b)!.add(a);
+  }
+  warState = state;
+  warIndex = m;
+  return m;
+}
+
+/** Countries start at peace; war exists only after a declaration. Insurgents fight everyone. */
 export function atWar(state: GameState, a: FactionId, b: FactionId): boolean {
   if (a === b) return false;
   if (a === NEUTRAL_ID || b === NEUTRAL_ID) return true;
-  return state.relations[relKey(a, b)] !== 'peace';
+  return wars(state).get(a)?.has(b) ?? false;
+}
+
+/** Factions currently at war with f (insurgents excluded). */
+export function enemiesOf(state: GameState, f: FactionId): FactionId[] {
+  const set = wars(state).get(f);
+  return set ? [...set] : [];
+}
+
+/** Is f at war with any country? */
+export function hasWars(state: GameState, f: FactionId): boolean {
+  return (wars(state).get(f)?.size ?? 0) > 0;
 }
 
 function makeFaction(id: FactionId, index: number, name: string, color: number, isPlayer: boolean, res: Resources): FactionState {
@@ -54,6 +91,8 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
     const c: City = {
       id: i,
       name: d.name,
+      ru: d.ru,
+      country: d.owner,
       x: pc.x,
       y: pc.y,
       cell: pc.cell,
@@ -76,7 +115,7 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
       capturer: null,
       lastAttacked: -999,
       cooldown: 0,
-      missiles: 0,
+      missiles: d.capital && d.size >= 3 && d.industry >= 3 ? 2 : 0,
       missileCd: 0,
       unrest: 0,
       region: i,
@@ -89,13 +128,15 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
     if (d.capital) {
       c.buildings.fortress = 1;
       c.buildings.barracks = 1;
+      // Established powers start with a missile battery in the capital.
+      if (d.size >= 3 && d.industry >= 3) c.buildings.missile_battery = 1;
     }
     if (pc.port && d.size >= 3) c.buildings.shipyard = 1;
     return c;
   });
 
+  // Everyone starts at peace; wars must be prepared and declared.
   const relations: Record<string, 'war' | 'peace'> = {};
-  for (const a of FACTIONS) for (const b of FACTIONS) if (a.id < b.id) relations[relKey(a.id, b.id)] = 'war';
 
   return {
     time: 0,
@@ -114,5 +155,9 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
     gameOver: null,
     eventTimer: 90,
     ai: {},
+    ops: [],
+    nextOpId: 1,
+    peaceOffers: [],
+    warStarted: {},
   };
 }
