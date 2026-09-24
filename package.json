@@ -1,0 +1,21 @@
+{
+  "name": "steel-meridian",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Steel Meridian — a browser-based 2D global war strategy game built with Phaser 3, TypeScript and Vite.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "simtest": "node scripts/run-simtest.mjs"
+  },
+  "dependencies": {
+    "phaser": "^3.90.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^6.4.3"
+  }
+}
