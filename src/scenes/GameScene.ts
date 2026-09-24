@@ -332,6 +332,13 @@ export class GameScene extends Phaser.Scene {
     return out;
   }
 
+  clearHover(): void {
+    if (this.unitViews.hovered === -1 && this.cityViews.hovered === -1) return;
+    this.unitViews.hovered = -1;
+    this.cityViews.hovered = -1;
+    this.ui.setWorldTip(null, 0, 0);
+  }
+
   hoverAt(x: number, y: number, sx: number, sy: number): void {
     this.hoverT -= this.game.loop.delta / 1000;
     if (this.hoverT > 0) return;

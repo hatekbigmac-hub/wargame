@@ -129,12 +129,13 @@ export class InputController {
       if (Math.hypot(p.x - cx, p.y - cy) < 2 || p.t > 2) this.panTween = null;
     }
     this.clampScroll();
-    // Hover.
+    // Hover (only while the cursor is actually over the map canvas, not the HUD).
     const ptr = this.scene.input.activePointer;
-    if (!this.drag && ptr.x >= 0) {
+    const overCanvas = this.mouse.inside && document.elementFromPoint(this.mouse.x, this.mouse.y) === this.scene.game.canvas;
+    if (!this.drag && ptr.x >= 0 && overCanvas) {
       const w = this.toWorld(ptr.x, ptr.y);
       this.scene.hoverAt(w.x, w.y, ptr.x, ptr.y);
-    }
+    } else if (!overCanvas) this.scene.clearHover();
   }
 
   private clampScroll(): void {
@@ -223,6 +224,15 @@ export class InputController {
     if (mode === 'missile' || mode === 'cityMissile') {
       this.scene.missileAt(w.x, w.y);
       return;
+    }
+    // Touch has no right button: with units selected, a tap on anything that is not one
+    // of our own units issues a command instead of changing the selection.
+    if (pointer.wasTouch && this.scene.selection.size) {
+      const own = this.scene.unitViews.pick(w.x, w.y, (u) => u.owner === this.scene.sim.state.player);
+      if (!own) {
+        this.scene.commandAt(w.x, w.y, false);
+        return;
+      }
     }
     const now = performance.now();
     const picked = this.scene.clickSelect(w.x, w.y, d.shift);
