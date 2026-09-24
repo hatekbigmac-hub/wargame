@@ -1,6 +1,7 @@
 // Game state construction and small state helpers.
 import type { City, Difficulty, FactionId, FactionState, GameState, Resources } from './types';
 import { FACTIONS, NEUTRAL_ID, NEUTRAL_COLOR } from '../data/factions';
+import { forcePlan, militaryOf, startingTechs } from '../data/military';
 import type { WorldGeo } from '../map/WorldGeo';
 
 export function emptyRes(): Resources {
@@ -82,7 +83,10 @@ export function cityImportance(c: Pick<City, 'size' | 'industry' | 'capital' | '
 export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Difficulty, seed: number): GameState {
   const factions: Record<FactionId, FactionState> = {};
   FACTIONS.forEach((f, i) => {
-    factions[f.id] = makeFaction(f.id, i, f.name, f.color, f.id === player, f.startingResources);
+    // Richer defence budgets start with a bigger war chest.
+    const res = { ...f.startingResources, money: f.startingResources.money + Math.round(Math.sqrt(militaryOf(f.id).b) * 150) };
+    factions[f.id] = makeFaction(f.id, i, f.name, f.color, f.id === player, res);
+    factions[f.id].techs = startingTechs(f.id);
   });
   factions[NEUTRAL_ID] = makeFaction(NEUTRAL_ID, FACTIONS.length, 'Insurgents', NEUTRAL_COLOR, false, emptyRes());
 
@@ -115,7 +119,7 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
       capturer: null,
       lastAttacked: -999,
       cooldown: 0,
-      missiles: d.capital && d.size >= 3 && d.industry >= 3 ? 2 : 0,
+      missiles: 0,
       missileCd: 0,
       unrest: 0,
       region: i,
@@ -128,8 +132,13 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
     if (d.capital) {
       c.buildings.fortress = 1;
       c.buildings.barracks = 1;
-      // Established powers start with a missile battery in the capital.
-      if (d.size >= 3 && d.industry >= 3) c.buildings.missile_battery = 1;
+      // Countries with real missile forces start with a battery in the capital; the player always
+      // gets at least one so the Missile Strike button works from the first minute.
+      const level = Math.max(forcePlan(d.owner).battery, d.owner === player ? 1 : 0);
+      if (level > 0) {
+        c.buildings.missile_battery = level;
+        c.missiles = level * 2;
+      }
     }
     if (pc.port && d.size >= 3) c.buildings.shipyard = 1;
     return c;

@@ -30,6 +30,13 @@ export class RNG {
   pick<T>(arr: readonly T[]): T {
     return arr[Math.floor(this.next() * arr.length)];
   }
+  shuffleInPlace<T>(arr: T[]): T[] {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
   weighted<T>(items: readonly T[], weight: (t: T) => number): T | null {
     let total = 0;
     for (const it of items) total += Math.max(0, weight(it));

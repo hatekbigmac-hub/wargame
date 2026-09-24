@@ -25,6 +25,7 @@ import { MapAssets, type MapLayer } from '../map/MapRenderer';
 import { proposePeace, declareWar, militaryStrength, acceptPeaceOffer, rejectPeaceOffer } from '../diplomacy/Diplomacy';
 import { gathered, PREP_HOURS, MAX_PREP_BONUS } from '../military/Offensives';
 import { MOBILIZE_HOURS } from '../ai/AISystem';
+import { militaryOf } from '../data/military';
 import type { TechCategory } from '../core/types';
 import { t, tn, onLangChange } from '../i18n';
 
@@ -1061,7 +1062,9 @@ export class GameUI {
         const act = !f.alive ? '' : war ? `<button class="btn small" data-a="peace" data-v="${fd.id}">${t('Propose ceasefire')}</button>` : `<button class="btn small danger" data-a="war" data-v="${fd.id}">${t('Declare war')}</button>`;
         const ratio = str / myStr;
         const cmp = ratio > 1.5 ? `<span class="bad">${t('Stronger')}</span>` : ratio < 0.67 ? `<span class="good">${t('Weaker')}</span>` : `<span class="warn">${t('Equal')}</span>`;
-        return `<tr><td><span class="swatch" style="background:${fd.css};color:${fd.css}"></span> <b class="dname" data-a="dfocus" data-v="${fd.id}">${esc(tn(fd))}</b>${neighbors.has(fd.id) ? ` <span class="tag">${t('Neighbour')}</span>` : ''}</td><td class="muted">${t(TIER_NAMES[powerTier(fd.id)])}</td><td class="num">${cities}</td><td>${f.alive ? `${bar(Math.min(1, str / Math.max(myStr, str, 1)), 'gold')}<small>${cmp}</small>` : '—'}</td><td>${rel}</td><td>${act}</td></tr>`;
+        const ms = militaryOf(fd.id);
+        const realTip = `<b>${esc(tn(fd))}</b> — ${t('Armed forces')}${ms.real ? '' : ` ${t('(rough estimate)')}`}<br/>${t('Active personnel')}: ${Math.round(ms.p * 1000).toLocaleString('en-US')}<br/>${t('Tanks')}: ${fmt(ms.t)} · ${t('Artillery')}: ${fmt(ms.a)}<br/>${t('Submarines')}: ${ms.s} · ${t('Destroyers & frigates')}: ${ms.d + ms.f} · ${t('Aircraft carriers')}: ${ms.cv}<br/>${t('Defence budget')}: $${ms.b}${t(' bn')}<br/><span class='muted'>${t('Click to show on the map')}</span>`;
+        return `<tr><td><span class="swatch" style="background:${fd.css};color:${fd.css}"></span> <b class="dname" data-a="dfocus" data-v="${fd.id}" data-tip="${esc(realTip)}">${esc(tn(fd))}</b>${neighbors.has(fd.id) ? ` <span class="tag">${t('Neighbour')}</span>` : ''}</td><td class="muted">${t(TIER_NAMES[powerTier(fd.id)])}</td><td class="num">${cities}</td><td>${f.alive ? `${bar(Math.min(1, str / Math.max(myStr, str, 1)), 'gold')}<small>${cmp}</small>` : '—'}</td><td>${rel}</td><td>${act}</td></tr>`;
       })
       .join('');
     this.setSection(

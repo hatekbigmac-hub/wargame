@@ -263,6 +263,8 @@ export class AISystem {
     const cap = sim.state.difficulty === 'hard' ? 60 : sim.state.difficulty === 'easy' ? 34 : 46;
     let target = Math.max(2, Math.min(cap, (fs.gross.money / 1.9) * 0.9));
     if (!war) target *= 0.55;
+    // Keep roughly the real-world standing forces (and grow them a little in wartime).
+    if (ai.baseline) target = Math.max(target, ai.baseline * (war ? 1.1 : 0.95));
     const total = landCount + navalCount;
     if (total >= target) return;
     let queued = 0;

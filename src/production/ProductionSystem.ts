@@ -114,7 +114,8 @@ export class ProductionSystem {
       if (item.id === 'fortress') sim.cities.refresh(c);
       if (item.id === 'missile_battery') c.missiles = Math.max(c.missiles, 1);
     }
-    sim.econ.recalc();
+    // Income figures refresh on the next hourly economy tick (a full recalc here is costly with ~2000 units).
+    if (c.owner === sim.state.player) sim.econ.recalc();
     sim.bus.emit('productionComplete', { city: c, item, unit });
   }
 }

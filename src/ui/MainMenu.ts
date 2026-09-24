@@ -3,6 +3,7 @@ import { el, esc, delegate, fmt } from './dom';
 import { openSaveLoad, openSettings, openCredits, openHelp, applyAudioSettings, type Win } from './Dialogs';
 import { FACTIONS, FACTION_MAP, factionName, powerTier, TIER_NAMES } from '../data/factions';
 import { CITY_DEFS } from '../data/cities';
+import { armyValue, militaryOf, unitCounts, forcePlan } from '../data/military';
 import { GAME_TITLE, GAME_VERSION } from '../config';
 import { Settings } from '../core/Settings';
 import { App } from '../app';
@@ -140,7 +141,10 @@ export class MainMenu {
   private openFactionSelect(): void {
     this.win?.close();
     this.selectOpen = true;
-    const byPower = [...FACTIONS].sort((a, b) => b.power - a.power);
+    // Countries ranked by the size of their real-world armed forces.
+    const byPower = [...FACTIONS].sort((a, b) => armyValue(b.id) - armyValue(a.id));
+    const rank = new Map(byPower.map((f, i) => [f.id, i]));
+    const maxArmy = armyValue(byPower[0].id);
     let selected = byPower[0].id;
     let difficulty: Difficulty = Settings.data.difficulty;
     let query = '';
@@ -156,7 +160,6 @@ export class MainMenu {
     overlay.append(win);
     this.root.append(overlay);
     const citiesOf = (id: string) => CITY_DEFS.filter((c) => c.owner === id);
-    const maxPower = byPower[0].power;
 
     win.innerHTML = `<div class="panel-title" style="font-size:15px;padding:11px 14px"><span data-t="title"></span><span class="grow"></span><span class="close" data-a="back">✕</span></div>
       <div class="win-body">
@@ -179,11 +182,13 @@ export class MainMenu {
       const needle = query.trim().toLowerCase();
       let list = FACTIONS.filter((f) => region === 'all' || f.continent === region);
       if (needle) list = list.filter((f) => f.name.toLowerCase().includes(needle) || (f.ru ?? '').toLowerCase().includes(needle) || f.id.toLowerCase() === needle);
-      list = [...list].sort((a, b) => (sort === 'power' ? b.power - a.power : tn(a).localeCompare(tn(b))));
+      list = [...list].sort((a, b) => (sort === 'power' ? rank.get(a.id)! - rank.get(b.id)! : tn(a).localeCompare(tn(b))));
       q('list').innerHTML = list.length
         ? list
             .map((f) => {
-              const tier = powerTier(f.id);
+              // Stars: rank of the country's real-world armed forces.
+              const rk = rank.get(f.id)!;
+              const tier = rk < 12 ? 3 : rk < 40 ? 2 : rk < 90 ? 1 : 0;
               return `<div class="fitem ${selected === f.id ? 'selected' : ''}" style="--fc:${f.css}" data-a="pick" data-v="${f.id}">
                 <span class="swatch" style="background:${f.css}"></span><span class="nm">${esc(tn(f))}</span>
                 <span class="tier t${tier}">${'★'.repeat(tier + 1)}</span></div>`;
@@ -197,7 +202,7 @@ export class MainMenu {
     const renderFilters = () => {
       const regions = ['all', ...Object.keys(CONTINENTS)];
       q('filters').innerHTML =
-        `<button class="btn small ${sort === 'power' ? 'active' : ''}" data-a="sort" data-v="power">${t('By power')}</button>` +
+        `<button class="btn small ${sort === 'power' ? 'active' : ''}" data-a="sort" data-v="power">${t('By military')}</button>` +
         `<button class="btn small ${sort === 'name' ? 'active' : ''}" data-a="sort" data-v="name">${t('A–Z')}</button>` +
         `<select class="btn small" data-k="region">${regions.map((r) => `<option value="${r}" ${region === r ? 'selected' : ''}>${r === 'all' ? t('All regions') : t(CONTINENTS[r])}</option>`).join('')}</select>` +
         `<button class="btn small" data-a="random" data-tip="${t('Random country')}">🎲</button>`;
@@ -208,23 +213,42 @@ export class MainMenu {
       const cities = citiesOf(f.id);
       const ports = cities.filter((c) => c.port).length;
       const tier = powerTier(f.id);
-      const challenge = [t('Very hard'), t('Hard'), t('Normal'), t('Easy')][tier];
-      const cls = ['bad', 'bad', 'warn', 'good'][tier];
-      const nb = f.neighbors.map((id) => FACTION_MAP[id]).filter(Boolean).sort((a, b) => b.power - a.power);
+      const rk = rank.get(f.id)!;
+      const level = rk < 12 ? 3 : rk < 40 ? 2 : rk < 90 ? 1 : 0;
+      const challenge = [t('Very hard'), t('Hard'), t('Normal'), t('Easy')][level];
+      const cls = ['bad', 'bad', 'warn', 'good'][level];
+      const nb = f.neighbors.map((id) => FACTION_MAP[id]).filter(Boolean).sort((a, b) => armyValue(b.id) - armyValue(a.id));
       const cap = cities.find((c) => c.capital) ?? cities[0];
       const top = [...cities].sort((a, b) => b.size * 3 + b.industry - (a.size * 3 + a.industry)).slice(0, 6);
+      const m = militaryOf(f.id);
+      const units = unitCounts(f.id);
+      const battery = Math.max(1, forcePlan(f.id).battery);
+      const num = (n: number) => (n > 0 ? fmt(n) : '—');
+      const pop = f.population >= 1 ? `${f.population.toFixed(1)}M` : `${Math.round(f.population * 1000)}k`;
       q('detail').innerHTML = `
         <div class="fd-head" style="--fc:${f.css}"><span class="faction-emblem" style="background:${f.css}">${f.short}</span>
-          <div><div class="fd-name">${esc(tn(f))}</div><div class="muted">${t(CONTINENTS[f.continent] ?? f.continent)} · ${t(TIER_NAMES[tier])}</div></div></div>
+          <div><div class="fd-name">${esc(tn(f))}</div><div class="muted">${t(CONTINENTS[f.continent] ?? f.continent)} · ${t(TIER_NAMES[tier])} · ${t('military #{n} in the world', { n: rk + 1 })}</div></div></div>
         <div class="stat-grid" style="margin-top:10px">
           <div class="stat"><span>${t('Capital')}</span><span>${esc(cap ? tn(cap) : '—')}</span></div>
           <div class="stat"><span>${t('Cities')}</span><span>${cities.length}</span></div>
           <div class="stat"><span>${t('Ports')}</span><span>${ports}</span></div>
-          <div class="stat"><span>${t('Population')}</span><span>${f.population >= 1e6 ? `${fmt(f.population / 1e6)}M` : fmt(f.population)}</span></div>
+          <div class="stat"><span>${t('Population')}</span><span>${pop}</span></div>
           <div class="stat"><span>${t('Industrial power')}</span><span>${f.power}</span></div>
           <div class="stat"><span>${t('Challenge')}</span><span class="${cls}">${challenge}</span></div>
         </div>
-        <div class="bar gold" style="margin-top:8px"><i style="width:${Math.max(3, Math.round((Math.sqrt(f.power) / Math.sqrt(maxPower)) * 100))}%"></i></div>
+        <div class="section-label">${t('Armed forces')} <span class="muted" style="text-transform:none;letter-spacing:0">${m.real ? t('(real-world estimate)') : t('(rough estimate)')}</span></div>
+        <div class="stat-grid">
+          <div class="stat"><span>${t('Active personnel')}</span><span>${m.p > 0 ? Math.round(m.p * 1000).toLocaleString('en-US') : '—'}</span></div>
+          <div class="stat"><span>${t('Defence budget')}</span><span>${m.b >= 1 ? `$${m.b}${t(' bn')}` : m.b > 0 ? `$${Math.round(m.b * 1000)}${t(' mn')}` : '—'}</span></div>
+          <div class="stat"><span>${t('Tanks')}</span><span>${num(m.t)}</span></div>
+          <div class="stat"><span>${t('Artillery')}</span><span>${num(m.a)}</span></div>
+          <div class="stat"><span>${t('Submarines')}</span><span>${num(m.s)}</span></div>
+          <div class="stat"><span>${t('Destroyers & frigates')}</span><span>${num(m.d + m.f)}</span></div>
+          <div class="stat"><span>${t('Aircraft carriers')}</span><span>${num(m.cv)}</span></div>
+          <div class="stat"><span>${t('Missile forces')}</span><span>${m.m ? '★'.repeat(m.m) : '—'}</span></div>
+        </div>
+        <div class="bar gold" style="margin-top:8px"><i style="width:${Math.max(3, Math.round((Math.sqrt(armyValue(f.id)) / Math.sqrt(maxArmy)) * 100))}%"></i></div>
+        <div class="muted" style="margin-top:4px">${t('In game: {l} land units, {n} ships, missile battery level {b}', { l: units.land, n: units.naval, b: battery })}</div>
         <div class="section-label">${t('Major cities')}</div>
         <div class="muted" style="line-height:1.4">${top.map((c) => esc(tn(c))).join(' · ') || '—'}</div>
         <div class="section-label">${t('Land neighbours')}</div>

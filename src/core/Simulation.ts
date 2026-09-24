@@ -16,7 +16,8 @@ import { EconomySystem } from '../economy/EconomySystem';
 import { ProductionSystem } from '../production/ProductionSystem';
 import { WorldEventSystem } from '../events/WorldEventSystem';
 import { AISystem } from '../ai/AISystem';
-import { NEUTRAL_ID, factionName, powerTier } from '../data/factions';
+import { NEUTRAL_ID, factionName } from '../data/factions';
+import { forcePlan, qualityOf, UPKEEP_BY_QUALITY } from '../data/military';
 import { TECH_MAP } from '../data/techs';
 import { unitDef } from '../data/units';
 import { updateOps } from '../military/Offensives';
@@ -67,15 +68,13 @@ export class Sim {
     return sim;
   }
 
-  /** Starting armies scale with each country's industrial power (≈ 600 units worldwide). */
+  /** Starting armies and navies follow each country's real-world armed forces (data/military.ts). */
   private setupInitialForces(): void {
     const s = this.state;
     for (const f of s.factionOrder) {
       const cities = s.cities.filter((c) => c.owner === f);
       if (!cities.length) continue;
-      const isPlayer = f === s.player;
-      let tier = powerTier(f);
-      if (isPlayer) tier = Math.max(tier, 1);
+      const plan = forcePlan(f);
       // Spawn on our own soil: in dense regions (Europe) a random offset can cross the border.
       const spawnNear = (type: string, x: number, y: number, r = 24) => {
         for (let tries = 0; tries < 10; tries++) {
@@ -89,35 +88,49 @@ export class Sim {
         }
         return this.units.spawn(type, f, x + this.rng.range(-4, 4), y + this.rng.range(-4, 4));
       };
+      // Land forces: a quarter around the capital, the rest spread over all cities by importance.
       const capital = cities.find((c) => c.capital) ?? cities[0];
-      const army = [
-        ['infantry', 'infantry'],
-        ['infantry', 'infantry', 'light_tank', 'artillery'],
-        ['infantry', 'infantry', 'infantry', 'medium_tank', 'light_tank', 'artillery'],
-        ['infantry', 'infantry', 'infantry', 'medium_tank', 'medium_tank', 'light_tank', 'artillery', 'anti_air', 'rocket_artillery'],
-      ][tier];
-      for (const type of army) spawnNear(type, capital.x, capital.y, 36);
-      if (isPlayer) spawnNear('rocket_artillery', capital.x, capital.y, 36);
-      // Garrisons in the larger cities.
-      const others = cities.filter((c) => c !== capital).sort((a, b) => b.size * b.industry - a.size * a.industry);
-      const garrisons = [0, 1, 3, 5][tier];
-      others.slice(0, garrisons).forEach((c, i) => {
-        spawnNear('infantry', c.x, c.y);
-        if (tier === 3 && i < 2) spawnNear('light_tank', c.x, c.y);
+      const others = cities.filter((c) => c !== capital);
+      const land: string[] = [];
+      for (const [type, n] of Object.entries(plan.land)) for (let i = 0; i < n; i++) land.push(type);
+      this.rng.shuffleInPlace(land);
+      const atCapital = others.length ? Math.ceil(land.length * 0.25) : land.length;
+      land.forEach((type, i) => {
+        const c = i < atCapital ? capital : this.rng.weighted(others, (o) => o.size * 2 + o.industry + 1)!;
+        spawnNear(type, c.x, c.y, c === capital ? 56 : 44);
       });
-      // Navies: coastal powers get warships; everyone above micro-state gets a troop transport.
-      const ports = cities.filter((c) => c.port).sort((a, b) => b.size * b.industry - a.size * a.industry);
-      if (!ports.length) continue;
-      const fleet = [
-        [],
-        ['patrol_boat', 'transport'],
-        ['destroyer', 'frigate', 'transport'],
-        ['destroyer', 'destroyer', 'submarine', 'frigate', 'missile_ship', 'transport', 'transport'],
-      ][tier];
-      fleet.forEach((type, i) => {
-        const p = ports[i % Math.min(ports.length, 3)];
-        this.units.spawn(type, f, p.portX + this.rng.range(-10, 10), p.portY + this.rng.range(-10, 10));
-      });
+      // Navy: capital ships and submarines at the main port, the rest spread over up to 4 ports.
+      const ports = cities.filter((c) => c.port).sort((a, b) => b.size * 2 + b.industry - (a.size * 2 + a.industry)).slice(0, 4);
+      if (ports.length) {
+        let i = 0;
+        for (const [type, n] of Object.entries(plan.naval)) {
+          for (let k = 0; k < n; k++) {
+            const p = type === 'carrier' || type === 'cruiser' ? ports[0] : ports[i++ % ports.length];
+            this.units.spawn(type, f, p.portX + this.rng.range(-12, 12), p.portY + this.rng.range(-12, 12));
+          }
+        }
+      }
+    }
+    this.setupBudgets();
+  }
+
+  /** Each country's defence budget pays for its standing forces (so large real armies are sustainable). */
+  private setupBudgets(): void {
+    const s = this.state;
+    const upkeep = new Map<FactionId, { money: number; metal: number; fuel: number; food: number }>();
+    for (const u of s.units.values()) {
+      let b = upkeep.get(u.owner);
+      if (!b) upkeep.set(u.owner, (b = { money: 0, metal: 0, fuel: 0, food: 0 }));
+      const m = UPKEEP_BY_QUALITY[qualityOf(u.owner)];
+      for (const [k, v] of Object.entries(unitDef(u.type).upkeep)) b[k as 'money'] += (v as number) * m;
+    }
+    for (const f of s.factionOrder) {
+      const fs = s.factions[f];
+      const b = upkeep.get(f) ?? { money: 0, metal: 0, fuel: 0, food: 0 };
+      fs.budget = { money: b.money, metal: b.metal, fuel: b.fuel, food: b.food };
+      fs.homeValue = s.cities.reduce((a, c) => a + (c.origOwner === f ? c.importance : 0), 0);
+      const ai = s.ai[f];
+      if (ai) ai.baseline = [...s.units.values()].filter((u) => u.owner === f).length;
     }
   }
 

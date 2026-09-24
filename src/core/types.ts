@@ -275,6 +275,10 @@ export interface FactionState {
   research: { id: string; progress: number; time: number } | null;
   effects: ActiveEffect[];
   stats: FactionStats;
+  /** Defence budget per hour that funds the standing (real-world sized) armed forces. */
+  budget?: Resources;
+  /** Sum of importance of the country's original cities (scales the budget as territory is lost). */
+  homeValue?: number;
 }
 
 export interface LogEntry {
@@ -314,6 +318,8 @@ export interface AIState {
   plan?: { unit: string; city: number } | null;
   war?: WarPlan | null;
   nextWarCheck?: number;
+  /** Size of the real-world standing forces the AI tries to maintain. */
+  baseline?: number;
 }
 
 export interface PlayerOp {

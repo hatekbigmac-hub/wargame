@@ -4,6 +4,7 @@ import { RES_KEYS } from '../core/types';
 import { unitDef } from '../data/units';
 import { emptyRes } from '../core/GameState';
 import type { Sim } from '../core/Simulation';
+import { qualityOf, UPKEEP_BY_QUALITY } from '../data/military';
 
 export interface CityYield {
   res: Resources;
@@ -56,11 +57,11 @@ export class EconomySystem {
   /** Recompute income figures without changing stockpiles (single pass over cities and units). */
   recalc(): void {
     const s = this.sim.state;
-    type Agg = { gross: Resources; upkeep: Resources; supply: number; demand: number; industry: number; labs: number };
+    type Agg = { gross: Resources; upkeep: Resources; supply: number; demand: number; industry: number; labs: number; value: number };
     const agg = new Map<FactionId, Agg>();
     const get = (f: FactionId) => {
       let a = agg.get(f);
-      if (!a) agg.set(f, (a = { gross: emptyRes(), upkeep: emptyRes(), supply: 0, demand: 0, industry: 0, labs: 0 }));
+      if (!a) agg.set(f, (a = { gross: emptyRes(), upkeep: emptyRes(), supply: 0, demand: 0, industry: 0, labs: 0, value: 0 }));
       return a;
     };
     for (const c of s.cities) {
@@ -71,10 +72,12 @@ export class EconomySystem {
       a.demand += y.powerDemand;
       a.industry += y.industry;
       a.labs += c.buildings.research_lab ?? 0;
+      a.value += c.importance;
     }
     const addUpkeep = (owner: FactionId, type: string) => {
       const a = get(owner);
-      const m = this.sim.tech.getMods(owner).upkeep;
+      // Soldiers and fuel cost less in poorer countries.
+      const m = this.sim.tech.getMods(owner).upkeep * UPKEEP_BY_QUALITY[qualityOf(owner)];
       for (const [k, v] of Object.entries(unitDef(type).upkeep)) a.upkeep[k as ResKey] += (v as number) * m;
     };
     for (const u of s.units.values()) {
@@ -90,6 +93,11 @@ export class EconomySystem {
         let m = mods.econ[k] * bonus;
         for (const e of fs.effects) m *= e.mods.resMult?.[k] ?? 1;
         a.gross[k] *= m;
+      }
+      // Defence budget: funds the standing forces, shrinking as home territory is lost.
+      if (fs.budget && fs.homeValue) {
+        const share = Math.max(0.25, Math.min(1.5, a.value / fs.homeValue));
+        for (const k of RES_KEYS) a.gross[k] += fs.budget[k] * share;
       }
       let powerMult = mods.econ.power;
       for (const e of fs.effects) powerMult *= e.mods.powerMult ?? 1;

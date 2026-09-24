@@ -29,7 +29,7 @@ export const DEBUG_ALLOWED = true;
 export const SIM_STEP = 0.1;
 
 export const SAVE_PREFIX = 'steelmeridian';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 /** One game second == one in-game hour. */
 export const START_DATE = Date.UTC(2032, 2, 1, 0, 0, 0);
