@@ -23,7 +23,7 @@ interface FloatText {
 }
 
 const FIRE_SOUND: Partial<Record<ProjectileKind, SfxId>> = {
-  bullet: 'rifle', cannon: 'cannon', shell: 'shell', rocket: 'missile', flak: 'flak', torpedo: 'torpedo', air: 'jet',
+  bullet: 'rifle', cannon: 'cannon', shell: 'shell', rocket: 'missile', flak: 'flak', torpedo: 'torpedo', air: 'jet', bomb: 'jet',
 };
 
 export class Effects {
@@ -34,6 +34,7 @@ export class Effects {
   private debris: Emitter;
   private water: Emitter;
   private wake: Emitter;
+  private contrail: Emitter;
   private trail: Emitter;
   private flash: Emitter;
   private bubbles: Emitter;
@@ -91,6 +92,10 @@ export class Effects {
       lifespan: { min: 900, max: 1500 }, speed: { min: 0, max: 5 }, scale: { start: 0.12, end: 0.5 },
       alpha: { start: 0.32, end: 0 }, tint: 0xe6f7ff,
     }, 19);
+    this.contrail = P('fx_soft', {
+      lifespan: { min: 500, max: 800 }, speed: 0, scale: { start: 0.06, end: 0.16 },
+      alpha: { start: 0.45, end: 0 }, tint: 0xffffff,
+    }, 25);
     this.trail = P('fx_smoke', {
       lifespan: { min: 700, max: 1300 }, speed: { min: 0, max: 8 }, scale: { start: 0.16, end: 0.6 },
       alpha: { start: 0.55, end: 0 }, tint: [0xdedede, 0xbfbfbf], rotate: { min: 0, max: 360 },
@@ -196,7 +201,7 @@ export class Effects {
     const len = unit ? unitDef(unit.type).size * 0.55 * this.lod : 8;
     const fx = x + Math.cos(a) * len;
     const fy = y + Math.sin(a) * len;
-    if (kind !== 'torpedo' && kind !== 'air') this.flash.explode(kind === 'bullet' || kind === 'flak' ? 1 : 2, fx, fy);
+    if (kind !== 'torpedo' && kind !== 'air' && kind !== 'bomb') this.flash.explode(kind === 'bullet' || kind === 'flak' ? 1 : 2, fx, fy);
     if (kind === 'shell' || kind === 'cannon') this.smoke.explode(1, fx, fy);
     if (kind === 'rocket') this.trail.explode(4, x, y);
     const snd = FIRE_SOUND[kind];
@@ -235,6 +240,19 @@ export class Effects {
         this.water.explode(18, x, y);
         this.explosion(x, y, 'medium');
         this.ring(x, y, 0xcdefff, 70, 700, 0.6);
+        this.audio.playAt('explosion', x, y, 0.8);
+        break;
+      case 'bomb':
+        this.explosion(x, y, p.splash >= 50 ? 'large' : 'medium');
+        if (p.splash >= 50) {
+          for (let i = 1; i < 4; i++) {
+            const ox = (Math.random() - 0.5) * 50;
+            const oy = (Math.random() - 0.5) * 50;
+            this.scene.time.delayedCall(i * 90, () => this.explosion(x + ox, y + oy, 'medium'));
+          }
+          this.cameraShake(0.003, 200);
+        }
+        if (!water) this.addWreck(x, y, p.splash >= 50 ? 1.3 : 0.8);
         this.audio.playAt('explosion', x, y, 0.8);
         break;
       case 'air':
@@ -375,6 +393,13 @@ export class Effects {
         const u = v.unit;
         if (!v.c.visible || !u.moving) continue;
         const def = unitDef(u.type);
+        if (def.domain === 'air') {
+          // Contrails behind jets (helicopters leave none).
+          if (def.cls !== 'air' || u.landed) continue;
+          const back = def.size * 0.5 * this.lod;
+          this.contrail.emitParticleAt(u.x - Math.cos(u.angle) * back, u.y - Math.sin(u.angle) * back, 1);
+          continue;
+        }
         if (def.domain !== 'naval' && !u.embarked) continue;
         const back = def.size * 0.45 * this.lod;
         const sx = u.x - Math.cos(u.angle) * back;
@@ -449,9 +474,10 @@ export class Effects {
       case 'torpedo': img = sc.add.image(0, 0, 'fx_torpedo').setScale(this.lod).setAlpha(0.85); break;
       case 'missile': img = sc.add.image(0, 0, 'fx_missile').setScale(1.1 * this.lod); break;
       case 'air': img = sc.add.image(0, 0, 'a_jet').setScale(0.45 * this.lod).setTint(color); break;
+      case 'bomb': img = sc.add.image(0, 0, 'fx_torpedo').setScale(0.6 * this.lod).setTint(0x2a2a2a); break;
       default: img = sc.add.image(0, 0, 'fx_dot');
     }
-    img.setDepth(p.kind === 'missile' || p.kind === 'air' ? 36 : p.kind === 'torpedo' ? 19 : 30);
+    img.setDepth(p.kind === 'missile' || p.kind === 'air' ? 36 : p.kind === 'torpedo' ? 19 : p.kind === 'bomb' ? 27 : 30);
     return img;
   }
 }

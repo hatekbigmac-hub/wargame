@@ -13,6 +13,7 @@ import { FACTIONS, getFactionDef, factionName, powerTier, TIER_NAMES } from '../
 import { turretURL } from '../effects/Textures';
 import { cityYield, MARKET_PRICE, MARKET_BUY, MARKET_SELL } from '../economy/EconomySystem';
 import { cityDefense, cityRange } from '../cities/CitySystem';
+import { hasAirfield } from '../production/ProductionSystem';
 import { CITY_MISSILE_RANGE } from '../combat/CombatSystem';
 import { TERRAIN_NAMES } from '../map/WorldGeo';
 import { atWar, relKey } from '../core/GameState';
@@ -25,11 +26,13 @@ import { MapAssets, type MapLayer } from '../map/MapRenderer';
 import { proposePeace, declareWar, militaryStrength, acceptPeaceOffer, rejectPeaceOffer } from '../diplomacy/Diplomacy';
 import { gathered, PREP_HOURS, MAX_PREP_BONUS } from '../military/Offensives';
 import { MOBILIZE_HOURS } from '../ai/AISystem';
-import { militaryOf } from '../data/military';
+import { militaryOf, airForceOf } from '../data/military';
 import type { TechCategory } from '../core/types';
 import { t, tn, onLangChange } from '../i18n';
 
 const STATUS = (u: Unit): string => {
+  if (u.order?.kind === 'rtb') return t('Returning to base');
+  if (u.landed) return t('Parked at airfield');
   if (u.order?.kind === 'board') return t('Boarding');
   if (u.order?.kind === 'unload') return t('Sailing to land');
   if (u.order?.kind === 'hold') return t('Holding');
@@ -429,7 +432,8 @@ export class GameUI {
     if (def.sonar) abil.push(t('Sonar'));
     if (def.intercept) abil.push(`${t('Intercept')} ${Math.round((def.intercept + this.sim.tech.getMods(u.owner).intercept) * 100)}%`);
     if (def.missiles) abil.push(`${t('Missiles')} ${u.missiles}/${def.missiles + this.sim.tech.getMods(u.owner).missileCap}`);
-    if (def.capacity) abil.push(t('Carries {n} land units', { n: def.capacity }));
+    if (def.capacity) abil.push(def.carries ? t('Carries {n} infantry units', { n: def.capacity }) : t('Carries {n} land units', { n: def.capacity }));
+    if (def.domain === 'air') abil.push(def.cls === 'heli' ? t('Refuels in any friendly city') : t('Refuels at airfields and carriers'));
     if (def.splash) abil.push(t('Splash damage'));
     if (def.stationaryFire) abil.push(t('Must halt to fire'));
     if (def.abilities?.includes('repair')) abil.push(t('Repairs'));
@@ -451,9 +455,10 @@ export class GameUI {
       <div class="panel-body">
         <div class="sel-head"><div class="sel-portrait"><img src="${this.portrait(u.type, u.owner)}"/></div>
           <div><div class="sel-name">${esc(t(def.name))}</div><div class="sel-sub">${esc(t(def.role))} · <span class="rank">${'★'.repeat(u.rank)}${'☆'.repeat(3 - u.rank)}</span></div>
-          <div class="sel-sub">${STATUS(u)} · ${def.domain === 'naval' ? t('At sea') : t(terrain)} ${sub}</div></div></div>
+          <div class="sel-sub">${STATUS(u)} · ${def.domain === 'naval' ? t('At sea') : def.domain === 'air' ? (u.landed ? t('Airfield') : t('In the air')) : t(terrain)} ${sub}</div></div></div>
         <div class="row" style="font-size:13px"><span class="muted">${t('Health')}</span><span class="spacer"></span><span class="num">${Math.ceil(u.hp)} / ${Math.round(u.maxHp)}</span></div>
         ${bar(r, hpClass(r))}
+        ${def.domain === 'air' && u.fuel !== undefined ? `<div class="row" style="font-size:13px;margin-top:4px"><span class="muted">${t('Fuel')}</span><span class="spacer"></span><span class="num">${u.fuel.toFixed(1)} / ${this.sim.units.endurance(u).toFixed(0)}${t('h')}</span></div>${bar(u.fuel / this.sim.units.endurance(u), 'gold')}` : ''}
         <div class="stat-grid">
           <div class="stat"><span>${t('Attack')}</span><span>${st.attack.toFixed(0)}</span></div>
           <div class="stat"><span>${t('Defense')}</span><span>${st.defense.toFixed(0)}</span></div>
@@ -483,7 +488,8 @@ export class GameUI {
       aboard += u.cargo?.length ?? 0;
     }
     const land = units.filter((u) => unitDef(u.type).domain === 'land').length;
-    const naval = units.length - land;
+    const airN = units.filter((u) => unitDef(u.type).domain === 'air').length;
+    const naval = units.length - land - airN;
     const comp = [...counts.entries()]
       .sort((a, b) => b[1] - a[1])
       .map(([ty, n]) => `<div class="row" style="padding:2px 0;cursor:pointer" data-a="selType" data-v="${ty}"><img src="${this.portrait(ty, units[0].owner)}" style="height:22px;width:32px;object-fit:contain"/><span>${esc(t(unitDef(ty).name))}</span><span class="spacer"></span><b class="num">×${n}</b></div>`)
@@ -493,6 +499,7 @@ export class GameUI {
         <div class="stat-grid">
           <div class="stat"><span>${t('Land')}</span><span>${land}</span></div>
           <div class="stat"><span>${t('Naval')}</span><span>${naval}</span></div>
+          ${airN ? `<div class="stat"><span>${t('Aircraft')}</span><span>${airN}</span></div>` : ''}
           <div class="stat"><span>${t('Firepower')}</span><span>${atk.toFixed(0)}</span></div>
           <div class="stat"><span>${t('Strength')}</span><span>${Math.round((hp / max) * 100)}%</span></div>
           ${aboard ? `<div class="stat"><span>${t('Aboard ships')}</span><span>${aboard}</span></div>` : ''}
@@ -525,7 +532,7 @@ export class GameUI {
     return `<div class="panel-title"><span style="color:${colorCss(f?.color ?? 0x999999)}">■</span>${esc(factionName(c.owner))}${this.relTag(c.owner)}<span class="grow"></span>${c.capital ? `<span class="tag gold">${t('Capital')}</span>` : ''}</div>
       <div class="panel-body">
         <div class="sel-head"><div class="sel-portrait" style="font-size:34px;color:${colorCss(f?.color ?? 0x999999)}">${ICONS.city}</div>
-          <div><div class="sel-name">${esc(tn(c))}</div><div class="sel-sub">${t(SIZE_NAMES[c.size])} · ${t('Industry')} ${c.industry}${c.port ? ` · ${t('Port')}` : ''}${c.airport ? ` · ${t('Airport')}` : ''}</div>
+          <div><div class="sel-name">${esc(tn(c))}</div><div class="sel-sub">${t(SIZE_NAMES[c.size])} · ${t('Industry')} ${c.industry}${c.port ? ` · ${t('Port')}` : ''}${hasAirfield(c) ? ` · ${c.airport ? t('Airport') : t('Air Base')}` : ''}</div>
           <div class="sel-sub">${tags.length ? tags.join(' · ') : t('No special resources')}${c.unrest > 0 ? ` · <span class="bad">${t('UNREST')}</span>` : ''}</div>
           ${c.origOwner !== c.owner ? `<div class="sel-sub muted">${t('Originally {name}', { name: esc(factionName(c.origOwner)) })}</div>` : ''}</div></div>
         <div class="row" style="font-size:13px"><span class="muted">${t('Defences')}</span><span class="spacer"></span><span class="num">${Math.ceil(c.hp)} / ${Math.round(c.maxHp)}</span></div>
@@ -554,7 +561,8 @@ export class GameUI {
     const missiles = own.filter((u) => unitDef(u.type).missiles);
     const ready = missiles.filter((u) => this.sim.combat.canLaunch(u)).length;
     const land = own.filter((u) => unitDef(u.type).domain === 'land');
-    const transports = own.filter((u) => u.type === 'transport');
+    const transports = own.filter((u) => !!unitDef(u.type).capacity);
+    const aircraft = own.filter((u) => unitDef(u.type).domain === 'air');
     const loaded = transports.filter((u) => u.cargo?.length);
     const mode = this.g.mode;
     return `<div class="panel-title">${ICONS.target}<span>${t('Orders')}</span></div>
@@ -567,6 +575,7 @@ export class GameUI {
         ${land.length ? this.actionBtn('board', ICONS.board, t('Board Transport'), 'B', '', false, t('Click one of your Transport Ships: up to 6 land units go aboard (or right-click the ship).'), `wide ${mode === 'board' ? 'active' : ''}`) : ''}
         ${transports.length ? this.actionBtn('unload', ICONS.unload, t('Unload at…'), 'U', '', !loaded.length, t('Click a coast: the transport sails there and lands its troops (or right-click the coast).'), `wide ${mode === 'unload' ? 'active' : ''}`) : ''}
         ${transports.length ? this.actionBtn('unloadHere', ICONS.unload, t('Unload here'), '', '', !loaded.length, t('Land the troops right now (the ship must be next to land).'), 'wide') : ''}
+        ${aircraft.length ? this.actionBtn('rtb', ICONS.plane, t('Return to base'), 'L', '', false, t('Fly back to the nearest airfield or carrier to refuel and repair. Aircraft also return on their own when fuel runs low.'), 'wide') : ''}
         ${missiles.length ? this.actionBtn('missile', ICONS.missile, `${t('Missile')} (${ready})`, 'M', '', ready === 0, t('Launch a guided missile at an enemy unit or city in range'), `wide ${mode === 'missile' ? 'active' : ''}`) : ''}
         ${this.actionBtn('repairUnits', ICONS.repair, t('Repair'), '', '', !own.some((u) => u.hp < u.maxHp - 1), t('Return to the nearest friendly city or port. Units in friendly cities repair over time (faster with engineers).'))}
         ${this.actionBtn('center', ICONS.eye, t('Center'), 'C')}
@@ -575,7 +584,7 @@ export class GameUI {
   }
 
   private cityActions(c: City): string {
-    const quick = ['infantry', 'medium_tank', 'artillery', c.port ? 'transport' : 'anti_air', c.port ? 'destroyer' : 'light_tank'];
+    const quick = ['infantry', 'medium_tank', 'artillery', c.port ? 'transport' : 'anti_air', hasAirfield(c) ? 'fighter' : c.port ? 'destroyer' : 'light_tank'];
     const f = this.player;
     const quickHtml = quick
       .map((ty) => {
@@ -789,6 +798,7 @@ export class GameUI {
         else g.beginUnload();
         break;
       case 'unloadHere': g.unloadHere(); break;
+      case 'rtb': g.returnToBase(); break;
       case 'center': g.centerOnSelection(); break;
       case 'disband': g.disbandSelected(); break;
       case 'repairUnits': g.returnForRepairs(); break;
@@ -871,7 +881,7 @@ export class GameUI {
     this.g.selectCity(id);
     const w = this.open('city', `${ICONS.city} ${t('City Management')}`, 'city-win', id);
     w.body.innerHTML = `<div data-s="head"></div><div class="city-grid"><div><div data-s="stats"></div><div class="section-label">${t('Infrastructure')}</div><div data-s="blds"></div></div>
-      <div><div class="section-label">${t('Production queue')}</div><div data-s="queue"></div><div class="section-label">${t('Land forces')}</div><div class="prod-grid" data-s="land"></div><div data-s="navalwrap"><div class="section-label">${t('Naval forces')}</div><div class="prod-grid" data-s="naval"></div></div></div></div>`;
+      <div><div class="section-label">${t('Production queue')}</div><div data-s="queue"></div><div class="section-label">${t('Land forces')}</div><div class="prod-grid" data-s="land"></div><div data-s="navalwrap"><div class="section-label">${t('Naval forces')}</div><div class="prod-grid" data-s="naval"></div></div><div class="section-label">${t('Air forces')}</div><div data-s="airhint"></div><div class="prod-grid" data-s="air"></div></div></div>`;
     this.renderCity();
   }
 
@@ -888,6 +898,7 @@ export class GameUI {
     const naval = c.port;
     const rateL = this.sim.production.cityRate(c, false, true);
     const rateN = this.sim.production.cityRate(c, true, false);
+    const rateA = this.sim.production.cityRate(c, false, false, true);
     this.setSection(q('head'), 'win-head', `<div class="city-banner" style="border-color:${colorCss(f.color)}"><div class="nm">${esc(tn(c))}</div>${c.capital ? `<span class="tag gold">${t('Capital')}</span>` : ''}${c.port ? `<span class="tag">${ICONS.anchor} ${t('Port')}</span>` : ''}${c.airport ? `<span class="tag">${ICONS.plane} ${t('Airport')}</span>` : ''}${c.unrest > 0 ? `<span class="tag bad">${t('Unrest {h}h', { h: Math.ceil(c.unrest) })}</span>` : ''}<span class="spacer"></span><span class="muted">${t(SIZE_NAMES[c.size])} · ${t('pop.')} ${(c.size * c.size * 0.9 + c.industry * 0.3).toFixed(1)}M</span></div>`);
     this.setSection(q('stats'), 'win-stats', `
       <div class="row" style="font-size:13px"><span class="muted">${t('Defences')}</span><span class="spacer"></span><span class="num">${Math.ceil(c.hp)} / ${Math.round(c.maxHp)}</span></div>${bar(c.hp / c.maxHp, 'prog')}
@@ -919,7 +930,7 @@ export class GameUI {
         ? c.queue
             .map((it, i) => {
               const nm = it.kind === 'unit' ? esc(t(unitDef(it.id).name)) : `${BUILDING_DEFS.find((b) => b.id === it.id)?.icon ?? ''} ${esc(t(BUILDING_DEFS.find((b) => b.id === it.id)?.name ?? it.id))}`;
-              const eta = i === 0 ? `<span class="muted">· ${Math.max(0, Math.ceil((it.time - it.progress) / Math.max(0.01, it.kind === 'unit' && unitDef(it.id).domain === 'naval' ? rateN : rateL)))}${t('h')}</span>` : `<span class="muted">· ${t('waiting')}</span>`;
+              const eta = i === 0 ? `<span class="muted">· ${Math.max(0, Math.ceil((it.time - it.progress) / Math.max(0.01, it.kind === 'unit' && unitDef(it.id).domain === 'naval' ? rateN : it.kind === 'unit' && unitDef(it.id).domain === 'air' ? rateA : rateL)))}${t('h')}</span>` : `<span class="muted">· ${t('waiting')}</span>`;
               return `<div class="queue-item"><span>${nm} ${eta}</span><button class="btn small danger" data-a="cancel" data-v="${i}" data-tip="${esc(t('Cancel (full refund if not started)'))}">${ICONS.close}</button>${bar(it.progress / it.time, 'prog')}</div>`;
             })
             .join('')
@@ -928,13 +939,18 @@ export class GameUI {
     const prodCard = (id: string) => {
       const def = unitDef(id);
       const chk = this.sim.production.canProduceUnit(c, id);
-      const extra = def.capacity ? `<br/><span class='good'>${t('Carries {n} land units', { n: def.capacity })}</span>` : '';
+      const extra = def.capacity
+        ? `<br/><span class='good'>${def.carries ? t('Carries {n} infantry units', { n: def.capacity }) : t('Carries {n} land units', { n: def.capacity })}</span>`
+        : def.endurance ? `<br/>${t('Endurance {h}h, then refuels at an airfield', { h: def.endurance })}` : '';
       return `<div class="prod ${chk.ok ? '' : 'disabled'}" data-a="produce" data-v="${id}" data-tip="${esc(`<b>${t(def.name)}</b> — ${t(def.role)}<br/>${t(def.desc)}<br/>ATK ${def.attack} · DEF ${def.defense} · HP ${def.hp} · RNG ${def.range}${extra}<br/>${t('Upkeep')} ${costHtml(def.upkeep)} /h`)}">
         <img src="${this.portrait(id, f.id)}"/><div class="nm">${t(def.name)}</div><div class="cost">${costHtml(def.cost, f.res)}</div><div class="cost">${def.time}${t('h')}</div>${chk.ok ? '' : `<div class="why">${t(chk.reason ?? '')}</div>`}</div>`;
     };
     this.setSection(q('land'), 'win-land', PRODUCIBLE_UNITS.filter((u) => u.domain === 'land').map((u) => prodCard(u.id)).join(''));
     q('navalwrap').style.display = naval ? '' : 'none';
     if (naval) this.setSection(q('naval'), 'win-naval', PRODUCIBLE_UNITS.filter((u) => u.domain === 'naval').map((u) => prodCard(u.id)).join(''));
+    const airfield = hasAirfield(c);
+    this.setSection(q('airhint'), 'win-airhint', airfield ? '' : `<div class="muted" style="font-size:13px;margin-bottom:6px">${t('No airfield: build an Air Base (Infrastructure) to produce and service aircraft here.')}</div>`);
+    this.setSection(q('air'), 'win-air', PRODUCIBLE_UNITS.filter((u) => u.domain === 'air').map((u) => prodCard(u.id)).join(''));
   }
 
   openResearch(): void {
@@ -1063,7 +1079,8 @@ export class GameUI {
         const ratio = str / myStr;
         const cmp = ratio > 1.5 ? `<span class="bad">${t('Stronger')}</span>` : ratio < 0.67 ? `<span class="good">${t('Weaker')}</span>` : `<span class="warn">${t('Equal')}</span>`;
         const ms = militaryOf(fd.id);
-        const realTip = `<b>${esc(tn(fd))}</b> — ${t('Armed forces')}${ms.real ? '' : ` ${t('(rough estimate)')}`}<br/>${t('Active personnel')}: ${Math.round(ms.p * 1000).toLocaleString('en-US')}<br/>${t('Tanks')}: ${fmt(ms.t)} · ${t('Artillery')}: ${fmt(ms.a)}<br/>${t('Submarines')}: ${ms.s} · ${t('Destroyers & frigates')}: ${ms.d + ms.f} · ${t('Aircraft carriers')}: ${ms.cv}<br/>${t('Defence budget')}: $${ms.b}${t(' bn')}<br/><span class='muted'>${t('Click to show on the map')}</span>`;
+        const af = airForceOf(fd.id);
+        const realTip = `<b>${esc(tn(fd))}</b> — ${t('Armed forces')}${ms.real ? '' : ` ${t('(rough estimate)')}`}<br/>${t('Active personnel')}: ${Math.round(ms.p * 1000).toLocaleString('en-US')}<br/>${t('Tanks')}: ${fmt(ms.t)} · ${t('Artillery')}: ${fmt(ms.a)}<br/>${t('Combat aircraft')}: ${fmt(af.fighters + af.strike + af.bombers)} · ${t('Attack helicopters')}: ${fmt(af.helis)}<br/>${t('Submarines')}: ${ms.s} · ${t('Destroyers & frigates')}: ${ms.d + ms.f} · ${t('Aircraft carriers')}: ${ms.cv}<br/>${t('Defence budget')}: $${ms.b}${t(' bn')}<br/><span class='muted'>${t('Click to show on the map')}</span>`;
         return `<tr><td><span class="swatch" style="background:${fd.css};color:${fd.css}"></span> <b class="dname" data-a="dfocus" data-v="${fd.id}" data-tip="${esc(realTip)}">${esc(tn(fd))}</b>${neighbors.has(fd.id) ? ` <span class="tag">${t('Neighbour')}</span>` : ''}</td><td class="muted">${t(TIER_NAMES[powerTier(fd.id)])}</td><td class="num">${cities}</td><td>${f.alive ? `${bar(Math.min(1, str / Math.max(myStr, str, 1)), 'gold')}<small>${cmp}</small>` : '—'}</td><td>${rel}</td><td>${act}</td></tr>`;
       })
       .join('');

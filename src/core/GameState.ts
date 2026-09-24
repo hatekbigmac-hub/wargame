@@ -141,6 +141,8 @@ export function createGameState(geo: WorldGeo, player: FactionId, difficulty: Di
       }
     }
     if (pc.port && d.size >= 3) c.buildings.shipyard = 1;
+    // Countries with an air force always have at least one airfield (at the capital).
+    if (d.capital && !d.airport && Object.keys(forcePlan(d.owner).air).length) c.buildings.airbase = 1;
     return c;
   });
 

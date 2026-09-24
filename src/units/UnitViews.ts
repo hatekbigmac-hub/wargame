@@ -19,6 +19,8 @@ interface UnitView {
   color: number;
   size: number;
   naval: boolean;
+  air: boolean;
+  heli: boolean;
   lastHp: number;
   flash: number;
   bodyAngle: number;
@@ -62,10 +64,12 @@ export class UnitViews {
     const color = this.sim.state.factions[u.owner]?.color ?? 0xcccccc;
     const naval = def.domain === 'naval';
     const size = def.size;
-    const c = sc.add.container(u.x, u.y).setDepth(naval ? 20 : 21);
+    const air = def.domain === 'air';
+    const c = sc.add.container(u.x, u.y).setDepth(naval ? 20 : air ? 26 : 21);
     const shadow = sc.add.image(3, 4, def.sprite).setTint(0x000000).setAlpha(0.35).setScale(UNIT_TEXTURE_SCALE);
     const body = sc.add.image(0, 0, def.sprite).setTint(color).setScale(UNIT_TEXTURE_SCALE);
-    const turret = def.turret ? sc.add.image(0, 0, def.turret).setTint(color).setScale(UNIT_TEXTURE_SCALE) : null;
+    const turret = def.turret ? sc.add.image(0, 0, def.turret).setTint(air ? 0x2a2f36 : color).setScale(UNIT_TEXTURE_SCALE) : null;
+    if (air && turret) turret.setAlpha(0.85);
     const ring = sc.add.image(0, 0, 'fx_ring_dash').setVisible(false);
     ring.setDisplaySize(size * 1.5, size * 1.5);
     const hpY = -size * 0.62 - 4;
@@ -76,7 +80,7 @@ export class UnitViews {
     children.push(hpBg, hpFill);
     c.add(children);
     const v: UnitView = {
-      unit: u, c, shadow, body, turret, transport: null, hpBg, hpFill, ring, color, size, naval,
+      unit: u, c, shadow, body, turret, transport: null, hpBg, hpFill, ring, color, size, naval, air, heli: def.cls === 'heli',
       lastHp: -1, flash: 0, bodyAngle: u.angle, turretAngle: u.turret, phase: Math.random() * 10, embarked: false,
     };
     this.views.set(u.id, v);
@@ -120,7 +124,15 @@ export class UnitViews {
     const k = instant ? 1 : Math.min(1, dt * 8);
     v.phase += dt;
     let bob = 0;
-    if (u.moving && !v.naval && !u.embarked) bob = def.cls === 'infantry' ? Math.sin(v.phase * 14) * 0.8 : Math.sin(v.phase * 30) * 0.35;
+    if (v.air) {
+      // Altitude: shadow drops away from airborne aircraft; helicopters sway gently.
+      const up = !u.landed;
+      if (v.heli && up) bob = Math.sin(v.phase * 3) * 0.7;
+      const [sx, sy, sa] = !up ? [2, 3, 0.35] : v.heli ? [6, 10, 0.24] : [11, 17, 0.18];
+      v.shadow.setPosition(sx, sy).setAlpha(sa);
+      v.c.setDepth(up ? 26 : 22);
+      if (v.turret && (up || u.order)) v.turret.rotation += dt * 26;
+    } else if (u.moving && !v.naval && !u.embarked) bob = def.cls === 'infantry' ? Math.sin(v.phase * 14) * 0.8 : Math.sin(v.phase * 30) * 0.35;
     v.c.setPosition(u.x, u.y + bob);
     if (v.c.scaleX !== this.lod && v.c.alpha >= 1) v.c.setScale(this.lod);
     else if (v.c.alpha < 1) v.c.setScale(Phaser.Math.Linear(v.c.scaleX, this.lod, Math.min(1, dt * 10)));
@@ -143,7 +155,7 @@ export class UnitViews {
     v.body.rotation = v.bodyAngle;
     v.shadow.rotation = v.bodyAngle;
     if (v.transport) v.transport.rotation = v.bodyAngle;
-    if (v.turret) {
+    if (v.turret && !v.air) {
       const engaged = u.targetUnit >= 0 || u.targetCity >= 0;
       const want = engaged ? u.turret : v.bodyAngle;
       v.turretAngle = lerpAngle(v.turretAngle, want, Math.min(1, dt * 5));

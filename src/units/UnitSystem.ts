@@ -1,5 +1,5 @@
 // Unit lifecycle, orders and movement.
-import type { City, FactionId, Order, Unit } from '../core/types';
+import type { City, FactionId, Order, Unit, UnitDef } from '../core/types';
 import { t as tr } from '../i18n';
 import { unitDef } from '../data/units';
 import { TERRAIN_SPEED } from '../map/WorldGeo';
@@ -7,6 +7,7 @@ import { worldToCell, cellCenterX, cellCenterY, WORLD_W, WORLD_H, CELL, COLS, RO
 import type { Sim } from '../core/Simulation';
 import { atWar } from '../core/GameState';
 import type { PathDomain } from '../map/Pathfinding';
+import { hasAirfield } from '../production/ProductionSystem';
 
 export const CAPTURE_RADIUS = 56;
 
@@ -62,6 +63,10 @@ export class UnitSystem {
     };
     u.turret = u.angle;
     u.embarked = false;
+    if (def.domain === 'air') {
+      u.fuel = this.endurance(u);
+      u.landed = true;
+    }
     s.units.set(u.id, u);
     this.sim.bus.emit('unitCreated', { unit: u });
     return u;
@@ -97,11 +102,73 @@ export class UnitSystem {
     return unitDef(t.type).capacity ?? 0;
   }
 
+  /** Can transport `t` carry unit `u`? (ships take any land unit, helicopters only infantry) */
+  canCarry(t: Unit, u: Unit): boolean {
+    const td = unitDef(t.type);
+    const ud = unitDef(u.type);
+    if (!td.capacity || ud.domain !== 'land') return false;
+    return !td.carries || td.carries.includes(ud.cls);
+  }
+
+  isAir(u: Unit): boolean {
+    return unitDef(u.type).domain === 'air';
+  }
+
+  /** Hours an aircraft can stay airborne. */
+  endurance(u: Unit): number {
+    const def = unitDef(u.type);
+    const refuel = this.sim.state.factions[u.owner]?.techs.includes('aerial_refueling');
+    return (def.endurance ?? 8) * (refuel ? 1.4 : 1);
+  }
+
+  private baseCache = [new Map<FactionId, { t: number; cities: City[]; carriers: Unit[] }>(), new Map<FactionId, { t: number; cities: City[]; carriers: Unit[] }>()];
+
+  /** Nearest friendly airfield: airport / air-base cities (helicopters: any city) or an aircraft carrier. */
+  nearestBase(u: Unit): { x: number; y: number; d: number } | null {
+    const s = this.sim.state;
+    const heli = unitDef(u.type).cls === 'heli';
+    const map = this.baseCache[heli ? 1 : 0];
+    let cache = map.get(u.owner);
+    if (!cache || s.time - cache.t > 1) {
+      const cities = s.cities.filter((c) => c.owner === u.owner && (heli || hasAirfield(c)));
+      const carriers: Unit[] = [];
+      for (const o of s.units.values()) if (o.owner === u.owner && o.type === 'carrier') carriers.push(o);
+      cache = { t: s.time, cities, carriers };
+      map.set(u.owner, cache);
+    }
+    let best: { x: number; y: number; d: number } | null = null;
+    for (const c of cache.cities) {
+      if (c.owner !== u.owner) continue;
+      const d = Math.hypot(c.x - u.x, c.y - u.y);
+      if (!best || d < best.d) best = { x: c.x, y: c.y, d };
+    }
+    for (const cv of cache.carriers) {
+      if (cv.dead) continue;
+      const d = Math.hypot(cv.x - u.x, cv.y - u.y);
+      if (!best || d < best.d) best = { x: cv.x, y: cv.y, d };
+    }
+    return best;
+  }
+
+  /** Send aircraft back to the nearest airfield to refuel and repair. */
+  orderRtb(units: Unit[]): number {
+    let n = 0;
+    for (const u of units) {
+      if (!this.isAir(u)) continue;
+      const b = this.nearestBase(u);
+      if (!b) continue;
+      this.setOrder(u, { kind: 'rtb', x: b.x, y: b.y });
+      u.path = [b.x, b.y];
+      n++;
+    }
+    return n;
+  }
+
   /** Land units walk to the coast next to the transport and embark. */
   orderBoard(units: Unit[], transport: Unit): number {
     let n = 0;
     for (const u of units) {
-      if (this.domainOf(u) !== 'land' || u.owner !== transport.owner) continue;
+      if (!this.canCarry(transport, u) || u.owner !== transport.owner) continue;
       this.setOrder(u, { kind: 'board', x: transport.x, y: transport.y, targetUnit: transport.id });
       n++;
     }
@@ -158,6 +225,19 @@ export class UnitSystem {
 
   /** Transport sails to the beach nearest (x, y) and lands its troops there. */
   orderUnload(t: Unit, x: number, y: number): boolean {
+    if (this.isAir(t)) {
+      // Helicopters fly straight to the landing zone (must be on land).
+      const geo = this.sim.geo;
+      let lz = worldToCell(x, y);
+      if (!geo.isLandPassable(lz)) lz = geo.nearestCell(x, y, 3, (c) => geo.isLandPassable(c));
+      if (lz < 0) {
+        if (t.owner === this.sim.state.player) this.sim.notifyOnce('nolz', tr('Pick a landing zone on land'), 'warn');
+        return false;
+      }
+      this.setOrder(t, { kind: 'unload', x: cellCenterX(lz), y: cellCenterY(lz) });
+      t.path = [cellCenterX(lz), cellCenterY(lz)];
+      return true;
+    }
     const beach = this.findBeach(t, x, y);
     if (beach < 0) {
       if (t.owner === this.sim.state.player) this.sim.notifyOnce('nobeach', tr('No coast within reach of that point — pick a spot near the sea'), 'warn');
@@ -260,7 +340,8 @@ export class UnitSystem {
 
   orderMove(units: Unit[], x: number, y: number, attackMove = false): void {
     const group = this.newGroup();
-    const land = units.filter((u) => this.domainOf(u) === 'land');
+    const air = units.filter((u) => this.isAir(u));
+    const land = units.filter((u) => this.domainOf(u) === 'land' && !this.isAir(u));
     const naval = units.filter((u) => this.domainOf(u) === 'naval');
     const apply = (list: Unit[], spacing: number) => {
       list.forEach((u, i) => {
@@ -273,6 +354,7 @@ export class UnitSystem {
     };
     apply(land, 20);
     apply(naval, 38);
+    apply(air, 26);
   }
 
   orderAttackUnit(units: Unit[], target: Unit): void {
@@ -298,6 +380,13 @@ export class UnitSystem {
         this.orderMove([u], city.x, city.y);
         continue;
       }
+      const def = unitDef(u.type);
+      if (!((def.vs.city ?? 0) > 0) && !((def.captureRate ?? 0) > 0) && def.domain === 'air') {
+        // Aircraft that cannot hurt a city (fighters) sweep the skies and troops around it instead.
+        this.setOrder(u, { kind: 'attackMove', x: city.x, y: city.y });
+        this.requestPath(u, city.x, city.y);
+        continue;
+      }
       this.setOrder(u, { kind: 'attack', x: city.x, y: city.y, targetCity: city.id });
       u.targetCity = city.id;
       u.targetUnit = -1;
@@ -321,6 +410,12 @@ export class UnitSystem {
   }
 
   requestPath(u: Unit, tx: number, ty: number, group = 0): void {
+    if (this.isAir(u)) {
+      u.path = [tx, ty];
+      u.pathIdx = 0;
+      u.pathPending = false;
+      return;
+    }
     const order = u.order;
     u.pathPending = true;
     this.sim.paths.request({
@@ -362,6 +457,10 @@ export class UnitSystem {
       if (u.dead) continue;
       const def = unitDef(u.type);
       const st = sim.tech.stats(u.owner, u.type);
+      if (def.domain === 'air') {
+        this.updateAir(u, def, st.speed, st.range, dt);
+        continue;
+      }
       let halt = false;
       const o = u.order;
       if (o) {
@@ -430,6 +529,25 @@ export class UnitSystem {
               break;
             }
             const d = Math.hypot(t.x - u.x, t.y - u.y);
+            if (this.isAir(t)) {
+              // Helicopter: walk to it; it must be over land our troops can reach.
+              if (d <= 30) {
+                if (!this.board(u, t)) {
+                  this.setOrder(u, null);
+                  if (u.owner === s.player) sim.notifyOnce('full', tr('Transport is full'), 'warn');
+                }
+                break;
+              }
+              if (!u.pathPending && (!u.path || s.time >= u.repathAt)) {
+                u.repathAt = s.time + 2;
+                const cell = worldToCell(t.x, t.y);
+                if (!sim.geo.isLandPassable(cell) || !sim.geo.landConnected(u.x, u.y, t.x, t.y)) {
+                  if (u.owner === s.player) sim.notifyOnce('heliland', tr('Land the helicopter where your troops can reach it'), 'warn');
+                } else this.requestPath(u, t.x, t.y);
+              }
+              if (u.path) halt = false;
+              break;
+            }
             if (d <= 46) {
               if (!this.board(u, t)) {
                 this.setOrder(u, null);
@@ -526,6 +644,12 @@ export class UnitSystem {
 
   /** Move toward a point directly if possible, otherwise request a path. */
   private chase(u: Unit, tx: number, ty: number): void {
+    if (this.isAir(u)) {
+      u.path = [tx, ty];
+      u.pathIdx = 0;
+      u.pathPending = false;
+      return;
+    }
     const domain = this.domainOf(u);
     const d = Math.hypot(tx - u.x, ty - u.y);
     if (d < 320 && this.sim.paths.finder.los(domain, u.x, u.y, tx, ty)) {
@@ -546,7 +670,7 @@ export class UnitSystem {
       return;
     }
     let speed = baseSpeed;
-    if (!naval) speed *= TERRAIN_SPEED[sim.geo.terrain[worldToCell(u.x, u.y)]];
+    if (!naval && cls !== 'air' && cls !== 'heli') speed *= TERRAIN_SPEED[sim.geo.terrain[worldToCell(u.x, u.y)]];
     const fs = sim.state.factions[u.owner];
     if (fs) {
       if ((naval || cls === 'armor') && fs.res.fuel <= 0 && fs.income.fuel < 0) speed *= 0.5;
@@ -581,20 +705,226 @@ export class UnitSystem {
     }
   }
 
+  // ------------------------------------------------------------------ aircraft
+
+  /**
+   * Aircraft fly straight lines, burn fuel while airborne and must return to an airfield
+   * (airport, air base, carrier; helicopters: any friendly city) to refuel and repair.
+   * Jets circle over their target; helicopters hover.
+   */
+  private updateAir(u: Unit, def: UnitDef, speed: number, range: number, dt: number): void {
+    const sim = this.sim;
+    const s = sim.state;
+    const endur = this.endurance(u);
+    if (u.fuel === undefined) u.fuel = endur;
+    // Fast path: parked, fuelled, repaired and nothing to do (full check about once an hour,
+    // e.g. when the carrier it sits on sails away or its airfield is captured).
+    if (u.landed && !u.order && u.targetUnit < 0 && u.fuel >= endur && u.hp >= u.maxHp && (Math.floor(s.time * 10) + u.id) % 10 !== 0) {
+      u.moving = false;
+      return;
+    }
+    const heli = def.cls === 'heli';
+    const base = this.nearestBase(u);
+    const o = u.order;
+    const atBase = !!base && base.d < 30;
+    u.embarked = false;
+
+    // Parked at an airfield: refuel, repair, scramble against nearby enemies when fuelled.
+    if (atBase && (!o || o.kind === 'rtb')) {
+      if (o) this.setOrder(u, null);
+      if (!u.landed) {
+        u.landed = true;
+        u.anchorX = u.x;
+        u.anchorY = u.y;
+      }
+      u.fuel = Math.min(endur, u.fuel + (dt * endur) / 1.5);
+      if (s.time - u.lastHit > 2) u.hp = Math.min(u.maxHp, u.hp + u.maxHp * 0.08 * dt);
+      u.moving = false;
+      u.path = null;
+      const t = u.targetUnit >= 0 ? s.units.get(u.targetUnit) : undefined;
+      if (!t || t.dead || u.fuel < endur * 0.5 || def.attack <= 0) return;
+      // Scramble.
+      if (Math.hypot(t.x - u.x, t.y - u.y) < 320) this.setOrder(u, { kind: 'attack', x: t.x, y: t.y, targetUnit: t.id });
+      else return;
+    }
+    if (u.landed && !o && base) {
+      // Our parking spot is gone (carrier moved, airfield lost): fly to the nearest base.
+      this.setOrder(u, { kind: 'rtb', x: base.x, y: base.y });
+    }
+    u.landed = false;
+
+    // Fuel.
+    u.fuel -= dt;
+    if (u.fuel <= 0) {
+      if (u.owner === s.player) sim.notify(tr('{unit} ran out of fuel and was lost', { unit: tr(def.name) }), 'bad', u.x, u.y);
+      this.remove(u, true, null);
+      return;
+    }
+    if (base && u.order?.kind !== 'rtb') {
+      const need = (base.d / Math.max(1, speed)) * 1.2 + 0.4;
+      if (u.fuel <= need) {
+        if (u.owner === s.player) sim.notifyOnce(`rtb${u.id}`, tr('{unit}: low fuel — returning to base', { unit: tr(def.name) }), 'info', u.x, u.y, 30);
+        this.setOrder(u, { kind: 'rtb', x: base.x, y: base.y });
+      }
+    }
+
+    const cur = u.order;
+    let orbit: { x: number; y: number } | null = null;
+    let goal: { x: number; y: number } | null = null;
+    switch (cur?.kind) {
+      case 'rtb':
+        if (base) goal = { x: base.x, y: base.y };
+        else this.setOrder(u, null);
+        break;
+      case 'move':
+      case 'attackMove': {
+        const tu = u.targetUnit >= 0 ? s.units.get(u.targetUnit) : undefined;
+        if (cur.kind === 'attackMove' && tu && !tu.dead && Math.hypot(tu.x - u.x, tu.y - u.y) <= range) orbit = { x: tu.x, y: tu.y };
+        else if (Math.hypot(cur.x - u.x, cur.y - u.y) > 4) goal = { x: cur.x, y: cur.y };
+        else {
+          this.setOrder(u, null);
+          u.anchorX = cur.x;
+          u.anchorY = cur.y;
+        }
+        break;
+      }
+      case 'attack': {
+        let tx = NaN;
+        let ty = NaN;
+        if (cur.targetUnit !== undefined) {
+          const t = s.units.get(cur.targetUnit);
+          if (!t || t.dead || !sim.combat.canSee(u.owner, t) || !atWar(s, u.owner, t.owner)) {
+            this.setOrder(u, null);
+            u.anchorX = u.x;
+            u.anchorY = u.y;
+            break;
+          }
+          u.targetUnit = t.id;
+          tx = t.x;
+          ty = t.y;
+        } else if (cur.targetCity !== undefined) {
+          const c = s.cities[cur.targetCity];
+          if (!c || !atWar(s, u.owner, c.owner)) {
+            this.setOrder(u, null);
+            u.anchorX = u.x;
+            u.anchorY = u.y;
+            break;
+          }
+          u.targetCity = c.id;
+          tx = c.x;
+          ty = c.y;
+        }
+        if (!isFinite(tx)) break;
+        if (Math.hypot(tx - u.x, ty - u.y) <= range * 0.85) orbit = { x: tx, y: ty };
+        else goal = { x: tx, y: ty };
+        break;
+      }
+      case 'unload': {
+        if (!u.cargo?.length) {
+          this.setOrder(u, null);
+          break;
+        }
+        if (Math.hypot(cur.x - u.x, cur.y - u.y) > 6) goal = { x: cur.x, y: cur.y };
+        else {
+          const n = this.unloadNow(u, cur.x, cur.y);
+          if (!n && u.owner === s.player) sim.notifyOnce('nolz', tr('Pick a landing zone on land'), 'warn');
+          this.setOrder(u, null);
+          u.anchorX = u.x;
+          u.anchorY = u.y;
+        }
+        break;
+      }
+      case 'hold':
+        orbit = { x: cur.x, y: cur.y };
+        break;
+      default: {
+        // Idle in the air: engage what the combat system acquired within a leash, else loiter.
+        const t = u.targetUnit >= 0 ? s.units.get(u.targetUnit) : undefined;
+        if (t && !t.dead && Math.hypot(t.x - u.anchorX, t.y - u.anchorY) < 320) {
+          if (Math.hypot(t.x - u.x, t.y - u.y) <= range * 0.85) orbit = { x: t.x, y: t.y };
+          else goal = { x: t.x, y: t.y };
+        } else orbit = { x: u.anchorX, y: u.anchorY };
+      }
+    }
+
+    if (goal) {
+      const d = Math.hypot(goal.x - u.x, goal.y - u.y);
+      const step = Math.min(d, speed * this.speedMult(u) * dt);
+      if (d > 0.01) {
+        u.angle = Math.atan2(goal.y - u.y, goal.x - u.x);
+        u.x += ((goal.x - u.x) / d) * step;
+        u.y += ((goal.y - u.y) / d) * step;
+      }
+      u.moving = true;
+    } else if (orbit) {
+      if (heli) {
+        // Hover, facing the target.
+        const d = Math.hypot(orbit.x - u.x, orbit.y - u.y);
+        if (d > range * 0.9 && u.order) {
+          const step = Math.min(d, speed * dt);
+          u.x += ((orbit.x - u.x) / d) * step;
+          u.y += ((orbit.y - u.y) / d) * step;
+        }
+        if (d > 1) u.angle = Math.atan2(orbit.y - u.y, orbit.x - u.x);
+        u.moving = false;
+      } else {
+        this.orbit(u, orbit.x, orbit.y, speed * this.speedMult(u), dt);
+      }
+    } else u.moving = false;
+    u.path = goal ? [goal.x, goal.y] : null;
+    u.pathIdx = 0;
+    u.x = Math.max(4, Math.min(WORLD_W - 4, u.x));
+    u.y = Math.max(4, Math.min(WORLD_H - 4, u.y));
+  }
+
+  private speedMult(u: Unit): number {
+    const fs = this.sim.state.factions[u.owner];
+    let m = 1;
+    if (fs) {
+      if (fs.res.fuel <= 0 && fs.income.fuel < 0) m *= 0.6;
+      for (const e of fs.effects) m *= e.mods.speedMult ?? 1;
+    }
+    return m;
+  }
+
+  /** Jets circle a point at ~38 px radius. */
+  private orbit(u: Unit, cx: number, cy: number, speed: number, dt: number): void {
+    const R = 38;
+    const d = Math.hypot(u.x - cx, u.y - cy);
+    if (d > R * 1.5) {
+      const step = Math.min(d - R, speed * dt);
+      u.angle = Math.atan2(cy - u.y, cx - u.x);
+      u.x += Math.cos(u.angle) * step;
+      u.y += Math.sin(u.angle) * step;
+    } else {
+      const a = Math.atan2(u.y - cy, u.x - cx) + (speed * 0.7 * dt) / R;
+      const r = d + (R - d) * Math.min(1, dt * 4);
+      const nx = cx + Math.cos(a) * r;
+      const ny = cy + Math.sin(a) * r;
+      u.angle = Math.atan2(ny - u.y, nx - u.x);
+      u.x = nx;
+      u.y = ny;
+    }
+    u.moving = true;
+  }
+
   /** Light separation so idle stacks spread out into readable formations. */
   private separate(): void {
     const sim = this.sim;
     const geo = sim.geo;
     for (const u of sim.state.units.values()) {
       if (u.dead || u.moving) continue;
-      const naval = unitDef(u.type).domain === 'naval';
+      const dom = unitDef(u.type).domain;
+      if (dom === 'air') continue;
+      const naval = dom === 'naval';
       const r = naval ? 30 : 17;
       const near = sim.spatial.query(u.x, u.y, r, this.tmp);
       let px = 0;
       let py = 0;
       for (const o of near) {
         if (o === u || o.owner !== u.owner) continue;
-        if ((unitDef(o.type).domain === 'naval') !== naval) continue;
+        const od = unitDef(o.type).domain;
+        if (od === 'air' || (od === 'naval') !== naval) continue;
         let dx = u.x - o.x;
         let dy = u.y - o.y;
         let d = Math.hypot(dx, dy);

@@ -3,7 +3,7 @@ import { el, esc, delegate, fmt } from './dom';
 import { openSaveLoad, openSettings, openCredits, openHelp, applyAudioSettings, type Win } from './Dialogs';
 import { FACTIONS, FACTION_MAP, factionName, powerTier, TIER_NAMES } from '../data/factions';
 import { CITY_DEFS } from '../data/cities';
-import { armyValue, militaryOf, unitCounts, forcePlan } from '../data/military';
+import { armyValue, militaryOf, unitCounts, forcePlan, airForceOf } from '../data/military';
 import { GAME_TITLE, GAME_VERSION } from '../config';
 import { Settings } from '../core/Settings';
 import { App } from '../app';
@@ -222,6 +222,7 @@ export class MainMenu {
       const top = [...cities].sort((a, b) => b.size * 3 + b.industry - (a.size * 3 + a.industry)).slice(0, 6);
       const m = militaryOf(f.id);
       const units = unitCounts(f.id);
+      const af = airForceOf(f.id);
       const battery = Math.max(1, forcePlan(f.id).battery);
       const num = (n: number) => (n > 0 ? fmt(n) : '—');
       const pop = f.population >= 1 ? `${f.population.toFixed(1)}M` : `${Math.round(f.population * 1000)}k`;
@@ -244,11 +245,13 @@ export class MainMenu {
           <div class="stat"><span>${t('Artillery')}</span><span>${num(m.a)}</span></div>
           <div class="stat"><span>${t('Submarines')}</span><span>${num(m.s)}</span></div>
           <div class="stat"><span>${t('Destroyers & frigates')}</span><span>${num(m.d + m.f)}</span></div>
+          <div class="stat"><span>${t('Combat aircraft')}</span><span>${num(af.fighters + af.strike + af.bombers)}</span></div>
+          <div class="stat"><span>${t('Attack helicopters')}</span><span>${num(af.helis)}</span></div>
           <div class="stat"><span>${t('Aircraft carriers')}</span><span>${num(m.cv)}</span></div>
           <div class="stat"><span>${t('Missile forces')}</span><span>${m.m ? '★'.repeat(m.m) : '—'}</span></div>
         </div>
         <div class="bar gold" style="margin-top:8px"><i style="width:${Math.max(3, Math.round((Math.sqrt(armyValue(f.id)) / Math.sqrt(maxArmy)) * 100))}%"></i></div>
-        <div class="muted" style="margin-top:4px">${t('In game: {l} land units, {n} ships, missile battery level {b}', { l: units.land, n: units.naval, b: battery })}</div>
+        <div class="muted" style="margin-top:4px">${t('In game: {l} land units, {a} aircraft, {n} ships, missile battery level {b}', { l: units.land, a: units.air, n: units.naval, b: battery })}</div>
         <div class="section-label">${t('Major cities')}</div>
         <div class="muted" style="line-height:1.4">${top.map((c) => esc(tn(c))).join(' · ') || '—'}</div>
         <div class="section-label">${t('Land neighbours')}</div>

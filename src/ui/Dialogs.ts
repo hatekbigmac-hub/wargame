@@ -157,6 +157,7 @@ export function openHelp(host: HTMLElement, onClose?: () => void): Win {
     ['M', 'Missile strike (then click a target)'],
     ['O', 'Prepare an offensive (then click the target city)'],
     ['B · U', 'Board a transport · Unload a transport'],
+    ['L', 'Return aircraft to base'],
     ['C / F', 'Center camera on selection'],
     ['Tab', 'Cycle idle units'],
     ['Ctrl + 1-9 · 1-9', 'Assign / recall control group'],
@@ -174,6 +175,7 @@ export function openHelp(host: HTMLElement, onClose?: () => void): Win {
     sec('Preparing an offensive', 'Select land units and press <b>Prepare Offensive</b> (O), then click the enemy city. Your troops gather at a staging area on your side of the border. The longer they prepare (up to 24h), the stronger the attack: up to <b>+25% attack</b>. When ready, press <b>Launch</b> in the Operations panel — war is declared automatically if needed.') +
     sec('Missiles', 'Press the <b>Missile Strike</b> button in the top bar (or <b>M</b>) and click an enemy unit or city. The nearest ready launcher in range fires: <b>city missile batteries</b> (your capital starts with one), <b>Missile Launchers</b> and <b>Missile Ships</b>. The button shows how many launchers are ready. Anti-air and frigates can shoot missiles down.') +
     sec('Crossing the sea', 'Land units cannot swim. Build a <b>Transport Ship</b> in a port city (Manage City → Naval forces). Select infantry, tanks or artillery and <b>right-click your transport</b> (or press Board) — up to 6 units go aboard. Then select the transport and <b>right-click a coast</b> (or press Unload) to land them. If the transport sinks, everyone aboard is lost — escort it with warships.') +
+    sec('Aviation', 'Build aircraft in cities with an airport or an <b>Air Base</b>: <b>Fighter Jets</b> win the skies and shoot down helicopters, <b>Strike Aircraft</b> bomb troops, ships and city defences, <b>Strategic Bombers</b> flatten cities far away, <b>Attack Helicopters</b> hunt tanks, and <b>Transport Helicopters</b> carry 2 infantry anywhere. Aircraft fly straight over land and sea but burn fuel: when it runs low they return to the nearest airfield or carrier on their own (or press <b>L</b>). Anti-air, frigates, fighters and city flak shoot them down; missiles cannot hit aircraft in flight. Aircraft cannot capture cities.') +
     sec('Capturing cities', 'Bombard an enemy city until its defences reach zero, then move land units into it with no defenders present. Control 60% of the world\'s cities or eliminate every rival to win. Lose all your cities and the war is lost.') +
     `<div class="section-label">${t('Controls')}</div><table class="table">${rows.map(([k, d]) => `<tr><td class="gold num" style="width:210px">${t(k)}</td><td>${t(d)}</td></tr>`).join('')}</table>`;
   return w;

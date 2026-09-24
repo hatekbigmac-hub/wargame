@@ -310,6 +310,9 @@ export class InputController {
       case 'u':
         sc.beginUnload();
         break;
+      case 'l':
+        sc.returnToBase();
+        break;
       case 'c':
       case 'f':
         sc.centerOnSelection();

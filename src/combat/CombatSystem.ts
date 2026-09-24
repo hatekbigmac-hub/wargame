@@ -15,7 +15,7 @@ export const CITY_MISSILE_DAMAGE = 150;
 
 export function projectilePos(p: Projectile, t = p.t): { x: number; y: number } {
   const k = Math.max(0, Math.min(1, t));
-  if (p.kind === 'missile' || p.kind === 'shell' || p.kind === 'rocket' || p.kind === 'air') {
+  if (p.kind === 'missile' || p.kind === 'shell' || p.kind === 'rocket' || p.kind === 'air' || p.kind === 'bomb') {
     const a = (1 - k) * (1 - k);
     const b = 2 * (1 - k) * k;
     const c = k * k;
@@ -25,7 +25,7 @@ export function projectilePos(p: Projectile, t = p.t): { x: number; y: number } 
 }
 
 const SPEED: Record<ProjectileKind, number> = {
-  bullet: 900, cannon: 700, flak: 1000, shell: 330, rocket: 380, torpedo: 150, missile: 420, air: 260,
+  bullet: 900, cannon: 700, flak: 1000, shell: 330, rocket: 380, torpedo: 150, missile: 420, air: 260, bomb: 240,
 };
 
 export class CombatSystem {
@@ -251,7 +251,7 @@ export class CombatSystem {
   }
 
   private tryFire(u: Unit, def: UnitDef): void {
-    if (u.embarked) return;
+    if (u.embarked || u.landed) return;
     if (def.stationaryFire && u.moving) return;
     const s = this.sim.state;
     const st = this.sim.tech.stats(u.owner, u.type);
@@ -289,14 +289,16 @@ export class CombatSystem {
     const rng = this.sim.rng;
     u.cooldown = def.reload * rng.range(0.9, 1.1);
     u.turret = Math.atan2(ty - u.y, tx - u.x);
-    if (def.domain === 'naval' || !this.hasTurret(def)) u.angle = def.domain === 'naval' ? u.angle : u.turret;
+    if (def.domain === 'air') {
+      if (def.cls === 'heli') u.angle = u.turret;
+    } else if (def.domain === 'naval' || !this.hasTurret(def)) u.angle = def.domain === 'naval' ? u.angle : u.turret;
     if (def.stealth) u.revealed = 5;
     const p = this.makeProjectile(def.projectile, u.owner, u.x, u.y, tx, ty, targetUnit, targetCity);
     p.src = u.id;
     p.attack = attack * this.attackMult(u.owner, u.rank, u);
     p.vs = def.vs;
     p.splash = def.splash ?? 0;
-    if (def.projectile === 'air') this.rollIntercept(p, 0.5);
+    if (def.projectile === 'air' || def.projectile === 'bomb') this.rollIntercept(p, 0.5);
     this.projectiles.push(p);
     this.sim.bus.emit('unitFired', { unit: u, city: null, kind: def.projectile, x: u.x, y: u.y, tx, ty });
     this.sim.bus.emit('projectileSpawn', { p });
@@ -309,10 +311,11 @@ export class CombatSystem {
   fireFromCity(c: City, t: Unit): void {
     const attack = (6 + c.size * 3) * (1 + (c.buildings.fortress ?? 0) * 0.3);
     const naval = unitDef(t.type).domain === 'naval';
-    const p = this.makeProjectile(naval || c.size >= 3 ? 'shell' : 'cannon', c.owner, c.x, c.y - 4, t.x, t.y, t.id, -1);
+    const air = unitDef(t.type).domain === 'air';
+    const p = this.makeProjectile(air ? 'flak' : naval || c.size >= 3 ? 'shell' : 'cannon', c.owner, c.x, c.y - 4, t.x, t.y, t.id, -1);
     p.srcCity = c.id;
     p.attack = attack;
-    p.vs = { infantry: 1, armor: 0.9, ship: 1, sub: 0.6 };
+    p.vs = { infantry: 1, armor: 0.9, ship: 1, sub: 0.6, air: 0.5, heli: 0.8 };
     this.projectiles.push(p);
     this.sim.bus.emit('unitFired', { unit: null, city: c, kind: p.kind, x: c.x, y: c.y, tx: t.x, ty: t.y });
     this.sim.bus.emit('projectileSpawn', { p });
@@ -335,6 +338,10 @@ export class CombatSystem {
       cy += ny * dist * 0.18 * side - dist * 0.3;
     }
     if (kind === 'air') cy -= dist * 0.1;
+    if (kind === 'bomb') {
+      dur += 0.25;
+      cy -= dist * 0.05;
+    }
     return {
       id: this.projSeq++, kind, owner, src: -1, srcCity: -1, sx, sy, tx, ty, cx, cy, t: 0, dur: Math.max(0.08, dur),
       targetUnit, targetCity, attack: 0, vs: {}, splash: 0, fixedDamage: 0, interceptAt: -1, interceptBy: null, done: false,
@@ -361,6 +368,7 @@ export class CombatSystem {
     if (!isFinite(tx)) return false;
     if (Math.hypot(tx - u.x, ty - u.y) > (def.missileRange ?? 0)) return false;
     if (target.unit && (!this.canSee(u.owner, target.unit) || !atWar(this.sim.state, u.owner, target.unit.owner))) return false;
+    if (target.unit && unitDef(target.unit.type).domain === 'air' && !target.unit.landed) return false;
     if (target.city && !atWar(this.sim.state, u.owner, target.city.owner)) return false;
     u.missiles--;
     u.missileCd = 3;
@@ -376,6 +384,7 @@ export class CombatSystem {
     const ty = target.unit ? target.unit.y : target.city!.y;
     if (Math.hypot(tx - c.x, ty - c.y) > CITY_MISSILE_RANGE) return false;
     if (target.unit && !this.canSee(c.owner, target.unit)) return false;
+    if (target.unit && unitDef(target.unit.type).domain === 'air' && !target.unit.landed) return false;
     const owner = target.unit?.owner ?? target.city!.owner;
     if (!atWar(this.sim.state, c.owner, owner)) return false;
     c.missiles--;
@@ -427,7 +436,7 @@ export class CombatSystem {
     for (const p of this.projectiles) {
       if (p.done) continue;
       // Direct-fire rounds home onto moving targets.
-      if (p.targetUnit >= 0 && (p.kind === 'bullet' || p.kind === 'cannon' || p.kind === 'flak' || p.kind === 'torpedo' || p.kind === 'air')) {
+      if (p.targetUnit >= 0 && (p.kind === 'bullet' || p.kind === 'cannon' || p.kind === 'flak' || p.kind === 'torpedo' || p.kind === 'air' || p.kind === 'bomb')) {
         const t = s.units.get(p.targetUnit);
         if (t && !t.dead) {
           p.tx = t.x;
@@ -489,6 +498,7 @@ export class CombatSystem {
   private coverOf(t: Unit): number {
     const def = unitDef(t.type);
     if (def.domain === 'naval') return 1;
+    if (def.domain === 'air') return t.landed ? 1.2 : 1;
     if (t.embarked) return 1.8;
     let cover = TERRAIN_COVER[this.sim.geo.terrain[worldToCell(t.x, t.y)]];
     const r = this.sim.geo.region[worldToCell(t.x, t.y)];

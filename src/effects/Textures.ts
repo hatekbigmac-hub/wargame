@@ -407,35 +407,160 @@ const UNIT_DRAW: Record<string, [number, number, Draw]> = {
     rr(ctx, x0 + 4, cy - 4, 5, 8, 1);
     fillStroke(ctx, L1, 1);
   })],
-  a_jet: [48, 48, (ctx, w, h) => {
+  // Aircraft face +x. Drawn light grey and tinted per faction; rotors are separate sprites.
+  a_jet: [64, 64, (ctx, w, h) => {
     const cx = w / 2, cy = h / 2;
+    const P = (pts: number[]) => {
+      ctx.beginPath();
+      ctx.moveTo(cx + pts[0], cy + pts[1]);
+      for (let i = 2; i < pts.length; i += 2) ctx.lineTo(cx + pts[i], cy + pts[i + 1]);
+      ctx.closePath();
+    };
+    // Swept wings and twin tails of a modern fighter.
+    P([6, -3, -8, -22, -14, -22, -8, -3, -8, 3, -14, 22, -8, 22, 6, 3]);
+    fillStroke(ctx, vgrad(ctx, cy - 22, cy + 22, L2, L3), 1.4);
+    P([-16, -3, -24, -12, -28, -12, -24, -2, -24, 2, -28, 12, -24, 12, -16, 3]);
+    fillStroke(ctx, L3, 1.4);
+    // Fuselage.
     ctx.beginPath();
-    ctx.moveTo(cx + 20, cy);
-    ctx.lineTo(cx + 4, cy - 3);
-    ctx.lineTo(cx - 4, cy - 18);
-    ctx.lineTo(cx - 9, cy - 18);
-    ctx.lineTo(cx - 6, cy - 3);
-    ctx.lineTo(cx - 14, cy - 3);
-    ctx.lineTo(cx - 19, cy - 9);
-    ctx.lineTo(cx - 21, cy - 9);
-    ctx.lineTo(cx - 19, cy);
-    ctx.lineTo(cx - 21, cy + 9);
-    ctx.lineTo(cx - 19, cy + 9);
-    ctx.lineTo(cx - 14, cy + 3);
-    ctx.lineTo(cx - 6, cy + 3);
-    ctx.lineTo(cx - 9, cy + 18);
-    ctx.lineTo(cx - 4, cy + 18);
-    ctx.lineTo(cx + 4, cy + 3);
-    ctx.closePath();
-    fillStroke(ctx, vgrad(ctx, cy - 18, cy + 18, L1, L3), 1.6);
+    ctx.moveTo(cx + 28, cy);
+    ctx.quadraticCurveTo(cx + 14, cy - 5, cx - 26, cy - 3.5);
+    ctx.lineTo(cx - 26, cy + 3.5);
+    ctx.quadraticCurveTo(cx + 14, cy + 5, cx + 28, cy);
+    fillStroke(ctx, vgrad(ctx, cy - 5, cy + 5, L1, L2), 1.4);
+    ctx.fillStyle = '#2b3a4a';
+    ctx.beginPath();
+    ctx.ellipse(cx + 12, cy, 5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
   }],
-  a_heli: [48, 48, (ctx, w, h) => {
+  a_strike: [64, 64, (ctx, w, h) => {
     const cx = w / 2, cy = h / 2;
+    // Straight, broad wings with bomb pylons.
+    rr(ctx, cx - 8, cy - 25, 12, 50, 3);
+    fillStroke(ctx, vgrad(ctx, cy - 25, cy + 25, L2, L3), 1.4);
+    ctx.fillStyle = D2;
+    for (const oy of [-17, -10, 10, 17]) {
+      ctx.beginPath();
+      ctx.ellipse(cx - 1, cy + oy, 4.5, 1.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    rr(ctx, cx - 26, cy - 11, 7, 22, 2);
+    fillStroke(ctx, L3, 1.4);
     ctx.beginPath();
-    ctx.ellipse(cx + 4, cy, 10, 6, 0, 0, Math.PI * 2);
-    fillStroke(ctx, L2, 1.6);
+    ctx.moveTo(cx + 26, cy);
+    ctx.quadraticCurveTo(cx + 12, cy - 6, cx - 26, cy - 4);
+    ctx.lineTo(cx - 26, cy + 4);
+    ctx.quadraticCurveTo(cx + 12, cy + 6, cx + 26, cy);
+    fillStroke(ctx, vgrad(ctx, cy - 6, cy + 6, L1, L2), 1.4);
+    ctx.fillStyle = '#2b3a4a';
+    ctx.beginPath();
+    ctx.ellipse(cx + 13, cy, 4.5, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }],
+  a_bomber: [96, 96, (ctx, w, h) => {
+    const cx = w / 2, cy = h / 2;
+    // Large swept wings with four engines.
+    ctx.beginPath();
+    ctx.moveTo(cx + 10, cy - 4);
+    ctx.lineTo(cx - 18, cy - 42);
+    ctx.lineTo(cx - 26, cy - 42);
+    ctx.lineTo(cx - 12, cy - 4);
+    ctx.lineTo(cx - 12, cy + 4);
+    ctx.lineTo(cx - 26, cy + 42);
+    ctx.lineTo(cx - 18, cy + 42);
+    ctx.lineTo(cx + 10, cy + 4);
+    ctx.closePath();
+    fillStroke(ctx, vgrad(ctx, cy - 42, cy + 42, L2, L3), 1.6);
     ctx.fillStyle = D1;
-    ctx.fillRect(cx - 18, cy - 1.5, 16, 3);
+    for (const [ox, oy] of [[-6, -16], [-12, -28], [-6, 16], [-12, 28]]) {
+      rr(ctx, cx + ox - 5, cy + oy - 2.5, 10, 5, 2);
+      fillStroke(ctx, D1, 1);
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx - 34, cy);
+    ctx.lineTo(cx - 44, cy - 14);
+    ctx.lineTo(cx - 47, cy - 14);
+    ctx.lineTo(cx - 42, cy);
+    ctx.lineTo(cx - 47, cy + 14);
+    ctx.lineTo(cx - 44, cy + 14);
+    ctx.closePath();
+    fillStroke(ctx, L3, 1.4);
+    ctx.beginPath();
+    ctx.moveTo(cx + 44, cy);
+    ctx.quadraticCurveTo(cx + 26, cy - 6.5, cx - 44, cy - 4);
+    ctx.lineTo(cx - 44, cy + 4);
+    ctx.quadraticCurveTo(cx + 26, cy + 6.5, cx + 44, cy);
+    fillStroke(ctx, vgrad(ctx, cy - 6, cy + 6, L1, L2), 1.6);
+    ctx.fillStyle = '#2b3a4a';
+    ctx.beginPath();
+    ctx.ellipse(cx + 33, cy, 5, 2.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }],
+  a_heli: [64, 64, (ctx, w, h) => {
+    const cx = w / 2, cy = h / 2;
+    // Tail boom and rotor.
+    rr(ctx, cx - 28, cy - 2, 26, 4, 2);
+    fillStroke(ctx, L3, 1.2);
+    rr(ctx, cx - 30, cy - 7, 4, 14, 1.5);
+    fillStroke(ctx, L3, 1.2);
+    // Stub wings with rocket pods.
+    rr(ctx, cx - 3, cy - 14, 6, 28, 2);
+    fillStroke(ctx, L3, 1.2);
+    ctx.fillStyle = D2;
+    for (const oy of [-12, 12]) {
+      rr(ctx, cx - 5, cy + oy - 2.5, 10, 5, 2);
+      ctx.fill();
+    }
+    // Narrow tandem-seat fuselage.
+    ctx.beginPath();
+    ctx.ellipse(cx + 6, cy, 16, 6.5, 0, 0, Math.PI * 2);
+    fillStroke(ctx, vgrad(ctx, cy - 7, cy + 7, L1, L2), 1.4);
+    ctx.fillStyle = '#2b3a4a';
+    ctx.beginPath();
+    ctx.ellipse(cx + 14, cy, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }],
+  a_heli_t: [72, 72, (ctx, w, h) => {
+    const cx = w / 2, cy = h / 2;
+    rr(ctx, cx - 32, cy - 2.5, 26, 5, 2);
+    fillStroke(ctx, L3, 1.2);
+    rr(ctx, cx - 34, cy - 8, 4, 16, 1.5);
+    fillStroke(ctx, L3, 1.2);
+    // Roomy cabin.
+    rr(ctx, cx - 12, cy - 9, 34, 18, 8);
+    fillStroke(ctx, vgrad(ctx, cy - 9, cy + 9, L1, L2), 1.4);
+    ctx.fillStyle = D1;
+    for (const ox of [-6, 2, 10]) ctx.fillRect(cx + ox, cy - 8, 4, 2);
+    for (const ox of [-6, 2, 10]) ctx.fillRect(cx + ox, cy + 6, 4, 2);
+    ctx.fillStyle = '#2b3a4a';
+    ctx.beginPath();
+    ctx.ellipse(cx + 18, cy, 3.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }],
+  a_rotor: [76, 76, (ctx, w, h) => {
+    const cx = w / 2, cy = h / 2;
+    // Motion-blurred disc plus four blades.
+    const g = ctx.createRadialGradient(cx, cy, 2, cx, cy, 36);
+    g.addColorStop(0, 'rgba(255,255,255,0.18)');
+    g.addColorStop(1, 'rgba(255,255,255,0.04)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2.6;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2 + 0.3;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(a) * 35, cy + Math.sin(a) * 35);
+      ctx.stroke();
+    }
+    ctx.fillStyle = L2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
   }],
 };
 

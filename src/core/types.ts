@@ -8,8 +8,8 @@ export type Resources = Record<ResKey, number>;
 export type Difficulty = 'easy' | 'normal' | 'hard';
 
 export type Domain = 'land' | 'naval' | 'air';
-export type TargetClass = 'infantry' | 'armor' | 'ship' | 'sub' | 'city' | 'air';
-export type ProjectileKind = 'bullet' | 'cannon' | 'shell' | 'rocket' | 'torpedo' | 'missile' | 'air' | 'flak';
+export type TargetClass = 'infantry' | 'armor' | 'ship' | 'sub' | 'city' | 'air' | 'heli';
+export type ProjectileKind = 'bullet' | 'cannon' | 'shell' | 'rocket' | 'torpedo' | 'missile' | 'air' | 'flak' | 'bomb';
 
 export enum Terrain {
   Water = 0,
@@ -62,6 +62,12 @@ export interface UnitDef {
   minRange?: number;
   captureRate?: number;
   capacity?: number;
+  /** Target classes a transport may carry (default: any land unit). */
+  carries?: TargetClass[];
+  /** Aircraft: built only in cities with an airport or air base. */
+  needsAirport?: boolean;
+  /** Aircraft: hours it can stay airborne before it must refuel at a base. */
+  endurance?: number;
   future?: boolean;
 }
 
@@ -139,7 +145,7 @@ export interface CityDef {
 
 // ---------------------------------------------------------------- state
 
-export type OrderKind = 'move' | 'attack' | 'attackMove' | 'hold' | 'board' | 'unload';
+export type OrderKind = 'move' | 'attack' | 'attackMove' | 'hold' | 'board' | 'unload' | 'rtb';
 
 export interface Order {
   kind: OrderKind;
@@ -189,6 +195,10 @@ export interface Unit {
   lastHit: number;
   aiTask: number;
   dead: boolean;
+  /** Aircraft: remaining airborne hours. */
+  fuel?: number;
+  /** Aircraft: parked at a friendly base (refuelling). */
+  landed?: boolean;
 }
 
 export interface ProdItem {

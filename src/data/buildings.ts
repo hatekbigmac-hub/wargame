@@ -12,6 +12,7 @@ export const BUILDING_DEFS: BuildingDef[] = [
   { id: 'fortress', name: 'Fortifications', icon: '🛡', desc: '+35% city defence and +30% city firepower per level.', maxLevel: 3, cost: { money: 360, metal: 160 }, time: 20 },
   { id: 'radar', name: 'Radar & Sonar', icon: '📡', desc: 'Extends city vision; coastal sonar detects submarines.', maxLevel: 3, cost: { money: 300, metal: 80 }, time: 15 },
   { id: 'missile_battery', name: 'Missile Battery', icon: '🚀', desc: 'City can launch 2 missiles per level at long range.', maxLevel: 3, cost: { money: 600, metal: 180, fuel: 60 }, time: 28, requires: 'rocketry' },
+  { id: 'airbase', name: 'Air Base', icon: '✈', desc: 'Runways and hangars: the city can build and service aircraft. +30% aircraft production speed per level.', maxLevel: 3, cost: { money: 500, metal: 140, fuel: 40 }, time: 20 },
   { id: 'research_lab', name: 'Research Lab', icon: '🔬', desc: '+15% research speed per level. Uses power.', maxLevel: 3, cost: { money: 440, metal: 80 }, time: 20 },
 ];
 

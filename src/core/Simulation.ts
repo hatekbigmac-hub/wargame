@@ -18,6 +18,7 @@ import { WorldEventSystem } from '../events/WorldEventSystem';
 import { AISystem } from '../ai/AISystem';
 import { NEUTRAL_ID, factionName } from '../data/factions';
 import { forcePlan, qualityOf, UPKEEP_BY_QUALITY } from '../data/military';
+import { hasAirfield } from '../production/ProductionSystem';
 import { TECH_MAP } from '../data/techs';
 import { unitDef } from '../data/units';
 import { updateOps } from '../military/Offensives';
@@ -99,6 +100,18 @@ export class Sim {
         const c = i < atCapital ? capital : this.rng.weighted(others, (o) => o.size * 2 + o.industry + 1)!;
         spawnNear(type, c.x, c.y, c === capital ? 56 : 44);
       });
+      // Air force: parked at the country's airfields (capital first).
+      const airfields = [capital, ...others].filter((c) => hasAirfield(c)).slice(0, 4);
+      if (airfields.length) {
+        let k = 0;
+        for (const [type, n] of Object.entries(plan.air)) {
+          for (let i = 0; i < n; i++) {
+            const c = airfields[k++ % airfields.length];
+            const a = this.rng.range(0, Math.PI * 2);
+            this.units.spawn(type, f, c.x + Math.cos(a) * 12, c.y + Math.sin(a) * 12);
+          }
+        }
+      }
       // Navy: capital ships and submarines at the main port, the rest spread over up to 4 ports.
       const ports = cities.filter((c) => c.port).sort((a, b) => b.size * 2 + b.industry - (a.size * 2 + a.industry)).slice(0, 4);
       if (ports.length) {

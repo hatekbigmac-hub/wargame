@@ -212,7 +212,45 @@ const TABLE: Record<string, Row> = {
   SMR: [ 0.1,    0,     0,   0,  0,  0,  0,   0,  0,  0, 0, 0,   0],
 };
 
+// Air forces (rounded estimates): fighters & multirole jets, ground-attack aircraft,
+// heavy bombers, attack helicopters.
+// prettier-ignore
+const AIR: Record<string, [fighters: number, strike: number, bombers: number, helis: number]> = {
+  USA: [1900, 280, 140, 750], CHN: [1500, 200, 200, 300], RUS: [ 800, 300, 130, 500], IND: [ 550, 100,   0, 100],
+  PRK: [ 400, 100,   0,  20], KOR: [ 400,   0,   0, 110], PAK: [ 350,  60,   0,  50], IRN: [ 150,  30,   0,  50],
+  TUR: [ 250,   0,   0,  60], EGY: [ 350,   0,   0,  90], ISR: [ 300,   0,   0,  48], SAU: [ 280,   0,   0,  60],
+  GBR: [ 150,   0,   0,  50], FRA: [ 220,   0,   0,  60], DEU: [ 140,   0,   0,  50], ITA: [ 180,   0,   0,  40],
+  JPN: [ 300,   0,   0,  60], UKR: [  60,  20,   0,  30], POL: [  90,  20,   0,  28], GRC: [ 230,   0,   0,  29],
+  ESP: [ 150,   0,   0,  18], BRA: [  60,  30,   0,  12], MEX: [   5,  30,   0,   0], IDN: [  45,  15,   0,  15],
+  VNM: [  70,  30,   0,  25], THA: [  60,  20,   0,   7], TWN: [ 400,   0,   0,  90], AUS: [ 100,   0,   0,  22],
+  CAN: [  85,   0,   0,   0], DZA: [ 150,  40,   0,  50], MAR: [  80,   0,   0,  24], NGA: [  10,  20,   0,  12],
+  SYR: [ 150,  60,   0,  40], ARE: [ 140,   0,   0,  28], MMR: [  80,  20,   0,  10], BGD: [  40,   0,   0,   6],
+  PHL: [  12,  20,   0,   6], ARG: [  10,  20,   0,   0], CHL: [  45,   0,   0,   0], COL: [  20,  20,   0,  20],
+  PER: [  30,  15,   0,  15], VEN: [  30,  10,   0,  10], ZAF: [  26,   0,   0,  11], KAZ: [  60,  20,   0,  20],
+  BLR: [  50,  20,   0,  12], AZE: [  20,  15,   0,  25], ARM: [   4,  10,   0,  10], UZB: [  40,  20,   0,  30],
+  TKM: [  20,   5,   0,  10], SGP: [ 100,   0,   0,  17], MYS: [  30,  10,   0,   0], SWE: [  90,   0,   0,   0],
+  NOR: [  40,   0,   0,   0], FIN: [  60,   0,   0,   0], NLD: [  40,   0,   0,  28], DNK: [  30,   0,   0,   0],
+  BEL: [  40,   0,   0,   0], PRT: [  25,   0,   0,   0], ROU: [  30,   0,   0,  20], HUN: [  14,   0,   0,   0],
+  CZE: [  14,   0,   0,   0], SVK: [  10,   0,   0,   0], SRB: [  15,   0,   0,  10], BGR: [  15,   0,   0,   6],
+  HRV: [  12,   0,   0,   0], AUT: [  15,   0,   0,   0], CHE: [  30,   0,   0,   0], CUB: [  20,   0,   0,  10],
+  JOR: [  50,   0,   0,  12], KWT: [  40,   0,   0,  16], QAT: [  90,   0,   0,  24], OMN: [  35,   0,   0,   0],
+  BHR: [  20,   0,   0,  16], IRQ: [  40,  10,   0,  40], LBY: [  20,  10,   0,  10], ETH: [  25,   0,   0,  15],
+  SDN: [  30,  15,   0,  20], AGO: [  40,  10,   0,  15], ECU: [  10,   0,   0,   0], LKA: [  10,   0,   0,   8],
+  KEN: [  15,   0,   0,   0], UGA: [  10,   0,   0,   5], ERI: [  10,   0,   0,   0], MNG: [   0,   0,   0,   6],
+  YEM: [   0,   0,   0,   0], AFG: [   0,   0,   0,  10], NZL: [   0,   0,   0,   0], TUN: [  12,   0,   0,   0],
+  LBN: [   0,   0,   0,   0], COD: [   0,   5,   0,   5], ZWE: [   5,   0,   0,   5], TCD: [   0,   5,   0,   3],
+};
+
 const cache = new Map<string, MilitaryStats>();
+
+/** Real-world air force (table value or a small estimate from the defence budget). */
+export function airForceOf(id: string): { fighters: number; strike: number; bombers: number; helis: number } {
+  const row = AIR[id];
+  if (row) return { fighters: row[0], strike: row[1], bombers: row[2], helis: row[3] };
+  const m = militaryOf(id);
+  const n = m.b >= 0.3 ? Math.round(Math.min(20, m.b * 8)) : 0;
+  return { fighters: n, strike: 0, bombers: 0, helis: Math.round(n / 2) };
+}
 
 /** Real-world military statistics for a country (table value or an estimate). */
 export function militaryOf(id: string): MilitaryStats {
@@ -251,6 +289,7 @@ export const UPKEEP_BY_QUALITY = [0.5, 0.65, 0.85, 1];
 export interface ForcePlan {
   land: Record<string, number>;
   naval: Record<string, number>;
+  air: Record<string, number>;
   /** missile battery level for the capital (0 = none) */
   battery: number;
 }
@@ -264,6 +303,7 @@ export function forcePlan(id: string): ForcePlan {
   const q = qualityOf(id);
   const land: Record<string, number> = {};
   const naval: Record<string, number> = {};
+  const air: Record<string, number> = {};
   const add = (rec: Record<string, number>, type: string, n: number) => {
     if (n > 0) rec[type] = (rec[type] ?? 0) + n;
   };
@@ -305,7 +345,16 @@ export function forcePlan(id: string): ForcePlan {
   add(naval, 'patrol_boat', m.pb + m.c >= 8 ? Math.min(3, Math.max(1, r(sq(m.pb + m.c) / 5))) : 0);
   add(naval, 'transport', m.am > 0 ? Math.min(4, Math.max(1, r(sq(m.am) / 1.6))) : 0);
 
-  return { land, naval, battery: m.m >= 3 ? 2 : m.m >= 1 ? 1 : 0 };
+  // Air force: one unit per squadron-sized group, square-root scale.
+  const af = airForceOf(id);
+  const sqn = (n: number, div: number) => (n > 0 ? Math.max(1, r(sq(n) / div)) : 0);
+  add(air, 'fighter', sqn(af.fighters, 4.5));
+  add(air, 'strike_fighter', sqn(af.strike, 4.5));
+  add(air, 'bomber', sqn(af.bombers, 5));
+  add(air, 'helicopter', af.helis >= 10 ? sqn(af.helis, 4.5) : 0);
+  add(air, 'transport_heli', af.helis >= 300 ? 2 : af.helis >= 30 ? 1 : 0);
+
+  return { land, naval, air, battery: m.m >= 3 ? 2 : m.m >= 1 ? 1 : 0 };
 }
 
 /** Headline numbers for the UI. */
@@ -315,6 +364,7 @@ export function militarySummary(id: string): { personnel: number; tanks: number;
 }
 
 const HEAVY_ARMOUR = new Set(['USA', 'DEU', 'GBR', 'ISR', 'KOR', 'FRA', 'JPN']);
+const STEALTH_JETS = new Set(['USA', 'CHN', 'ISR', 'JPN', 'KOR', 'GBR', 'ITA', 'AUS', 'NLD', 'NOR', 'DNK']);
 const QUIET_SUBS = new Set(['USA', 'RUS', 'GBR', 'FRA', 'JPN', 'DEU', 'KOR', 'SWE', 'AUS', 'CHN', 'ISR', 'ITA']);
 
 /**
@@ -343,6 +393,12 @@ export function startingTechs(id: string): string[] {
   if (m.ad >= 2) want.push('air_defense');
   if (m.ad >= 3 || m.m >= 3) want.push('missile_guidance');
   if (q >= 3) want.push('mass_production');
+  const af = airForceOf(id);
+  if (af.fighters + af.strike > 0) want.push('jet_aircraft');
+  if (af.helis > 0) want.push('helicopters');
+  if (af.bombers > 0) want.push('strategic_bombing');
+  if (STEALTH_JETS.has(id)) want.push('stealth_aircraft');
+  if (id === 'USA' || id === 'CHN' || id === 'RUS' || id === 'FRA' || id === 'GBR' || id === 'ISR') want.push('aerial_refueling');
   const out = new Set<string>();
   const addWithReqs = (t: string) => {
     const def = TECH_MAP[t];
@@ -365,14 +421,14 @@ export function armyValue(id: string): number {
   if (v !== undefined) return v;
   const plan = forcePlan(id);
   v = 0;
-  for (const [type, n] of [...Object.entries(plan.land), ...Object.entries(plan.naval)]) v += (UNIT_MAP[type]?.cost.money ?? 100) * n;
+  for (const [type, n] of [...Object.entries(plan.land), ...Object.entries(plan.naval), ...Object.entries(plan.air)]) v += (UNIT_MAP[type]?.cost.money ?? 100) * n;
   v *= [0.55, 0.7, 0.85, 1][qualityOf(id)] * (1 + startingTechs(id).length * 0.04);
   valueCache.set(id, v);
   return v;
 }
 
-export function unitCounts(id: string): { land: number; naval: number } {
+export function unitCounts(id: string): { land: number; naval: number; air: number } {
   const plan = forcePlan(id);
   const sum = (r: Record<string, number>) => Object.values(r).reduce((a, b) => a + b, 0);
-  return { land: sum(plan.land), naval: sum(plan.naval) };
+  return { land: sum(plan.land), naval: sum(plan.naval), air: sum(plan.air) };
 }

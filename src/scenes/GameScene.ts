@@ -279,7 +279,7 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.mode === 'board') {
       for (const u of s.units.values()) {
-        if (u.owner !== s.player || u.type !== 'transport') continue;
+        if (u.owner !== s.player || !unitDef(u.type).capacity) continue;
         g.lineStyle(2.5 / zoom, 0x7dffa0, pulse);
         g.strokeCircle(u.x, u.y, 26 + 6 / zoom);
       }
@@ -459,8 +459,9 @@ export class GameScene extends Phaser.Scene {
       const enemy = atWar(s, s.player, u.owner) && u.owner !== s.player;
       const own = u.owner === s.player;
       const cargo = u.cargo?.length ? `<br/>${t('Aboard: {n}/{max}', { n: u.cargo.length, max: def.capacity ?? 0 })}` : '';
-      const boardHint = own && u.type === 'transport' && this.hasSelectedLand() ? `<br/><span class="good">${t('Right-click to board this transport')}</span>` : '';
-      this.ui.setWorldTip(`<b>${t(def.name)}</b> <span style="color:${colorCss(f.color)}">■ ${esc(factionName(u.owner))}</span> ${rel(u.owner)}<br/>${t('HP')} ${Math.ceil(u.hp)}/${Math.round(u.maxHp)}${u.rank ? ` · ${'★'.repeat(u.rank)}` : ''}${cargo}${boardHint}${enemy && this.selection.size ? `<br/><span class="bad">${t('Right-click to attack')}</span>` : ''}`, sx, sy);
+      const boardHint = own && def.capacity && this.ownSelected().some((l) => this.sim.units.canCarry(u, l)) ? `<br/><span class="good">${t('Right-click to board this transport')}</span>` : '';
+      const fuel = def.domain === 'air' && own && u.fuel !== undefined ? `<br/>${t('Fuel')} ${u.fuel.toFixed(1)}/${this.sim.units.endurance(u).toFixed(0)}${t('h')}${u.landed ? ` · ${t('Parked at airfield')}` : ''}` : '';
+      this.ui.setWorldTip(`<b>${t(def.name)}</b> <span style="color:${colorCss(f.color)}">■ ${esc(factionName(u.owner))}</span> ${rel(u.owner)}<br/>${t('HP')} ${Math.ceil(u.hp)}/${Math.round(u.maxHp)}${u.rank ? ` · ${'★'.repeat(u.rank)}` : ''}${fuel}${cargo}${boardHint}${enemy && this.selection.size ? `<br/><span class="bad">${t('Right-click to attack')}</span>` : ''}`, sx, sy);
     } else if (c) {
       const f = s.factions[c.owner];
       const enemy = atWar(s, s.player, c.owner) && c.owner !== s.player;
@@ -492,8 +493,8 @@ export class GameScene extends Phaser.Scene {
     const s = this.sim.state;
     const land = units.filter((u) => unitDef(u.type).domain === 'land');
     // Right-click on one of our transports with land units selected: board it.
-    const ownTransport = this.unitViews.pick(x, y, (u) => u.owner === s.player && u.type === 'transport' && !this.selection.has(u.id));
-    if (ownTransport && land.length) {
+    const ownTransport = this.unitViews.pick(x, y, (u) => u.owner === s.player && !!unitDef(u.type).capacity && !this.selection.has(u.id));
+    if (ownTransport && land.some((l) => this.sim.units.canCarry(ownTransport, l))) {
       this.doBoard(land, ownTransport);
       return;
     }
@@ -547,7 +548,7 @@ export class GameScene extends Phaser.Scene {
 
   boardAt(x: number, y: number): void {
     const s = this.sim.state;
-    const tr = this.unitViews.pick(x, y, (u) => u.owner === s.player && u.type === 'transport');
+    const tr = this.unitViews.pick(x, y, (u) => u.owner === s.player && !!unitDef(u.type).capacity);
     if (!tr) {
       this.ui.toast(t('Click one of your Transport Ships'), 'warn');
       App.audio.play('error');
@@ -557,14 +558,20 @@ export class GameScene extends Phaser.Scene {
     this.setMode('normal');
   }
 
-  private doBoard(land: Unit[], tr: Unit): void {
+  private doBoard(units: Unit[], tr: Unit): void {
     const s = this.sim.state;
+    const land = units.filter((u) => this.sim.units.canCarry(tr, u));
+    if (!land.length) {
+      this.ui.toast(t('Helicopters can only carry infantry'), 'warn');
+      App.audio.play('error');
+      return;
+    }
     const cap = unitDef(tr.type).capacity ?? 0;
     let pending = 0;
     for (const u of s.units.values()) if (u.order?.kind === 'board' && u.order.targetUnit === tr.id && !land.includes(u)) pending++;
     const free = cap - (tr.cargo?.length ?? 0) - pending;
     if (free <= 0) {
-      this.ui.toast(t('Transport is full (6 units)'), 'warn');
+      this.ui.toast(t('Transport is full'), 'warn');
       App.audio.play('error');
       return;
     }
@@ -734,6 +741,11 @@ export class GameScene extends Phaser.Scene {
       App.audio.play('error');
       return;
     }
+    if (unit && unitDef(unit.type).domain === 'air' && !unit.landed) {
+      this.ui.toast(t('Missiles cannot hit aircraft in flight — use fighters or anti-air'), 'warn');
+      App.audio.play('error');
+      return;
+    }
     const target = unit ? { unit } : { city: city! };
     const tx = unit ? unit.x : city!.x;
     const ty = unit ? unit.y : city!.y;
@@ -763,6 +775,20 @@ export class GameScene extends Phaser.Scene {
     const more = this.mode === 'cityMissile' ? (s.cities[this.selectedCity]?.missiles ?? 0) >= 1 : this.mode === 'missile' ? this.ownSelected().some((u) => this.sim.combat.canLaunch(u)) : this.readyLaunchers().length > 0;
     if (!ok) return;
     if (!more || !keep) this.setMode('normal');
+  }
+
+  /** Send selected aircraft back to the nearest airfield or carrier. */
+  returnToBase(): void {
+    const air = this.ownSelected().filter((u) => this.sim.units.isAir(u));
+    if (!air.length) {
+      this.ui.toast(t('Select aircraft first'), 'warn');
+      return;
+    }
+    const n = this.sim.units.orderRtb(air);
+    if (n) {
+      this.ui.toast(t('{n} aircraft returning to base', { n }), 'info');
+      App.audio.play('move');
+    } else this.ui.toast(t('No friendly airfield or carrier available'), 'warn');
   }
 
   orderStop(): void {

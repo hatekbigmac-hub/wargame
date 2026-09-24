@@ -38,6 +38,7 @@ The production build is a static site. Asset paths are relative (`base: './'`), 
 | Missile strike | **Missile Strike** button in the top bar or M, then click a target |
 | Prepare an offensive | O (or *Prepare Offensive*), then click the target city |
 | Board a transport · unload | Right-click your transport with land units selected (or B) · right-click a coast with the transport selected (or U) |
+| Return aircraft to base | L |
 | Center the camera · cycle idle units | C · Tab |
 | Control groups | Ctrl + 1–9 to assign, 1–9 to recall |
 | Pause · change speed | Space · + / − (or the 1× 2× 4× buttons) |
@@ -65,11 +66,12 @@ The production build is a static site. Asset paths are relative (`base: './'`), 
 - **Cities:** each has its own population, industry, resources, port/airport, defences, garrison, a production queue and 11 upgradeable buildings (factories, power plants, mines, refineries, farms, barracks, shipyards, fortifications, radar, missile batteries and research labs).
 - **Land units (11 types):** infantry, mechanized infantry, elite infantry, recon, engineers, light, medium and heavy tanks, artillery, missile launchers and anti-air. Tank turrets rotate independently of the hull.
 - **Naval units (8 types):** patrol boats, transport ships, frigates, destroyers, cruisers, missile ships, submarines and aircraft carriers. Transports carry up to 6 land units; the AI uses them for seaborne invasions.
+- **Aviation (5 types):** fighter jets, strike aircraft, strategic bombers, attack helicopters and transport helicopters (2 infantry units, over any terrain or sea). Aircraft fly straight lines, circle over their targets (helicopters hover), burn fuel while airborne and return on their own to the nearest airfield or carrier to refuel and repair. They are built in cities with an airport or an Air Base, shot down by anti-air, warships, fighters and city flak, cannot capture cities and cannot be hit by missiles in flight. Every country starts with an air force scaled from its real one, and the AI uses fighters for air cover, strike aircraft and helicopters against troops, and bombers against cities.
 - **Submarines:** stay hidden until an enemy ship with sonar gets close, show up when they fire, and use torpedoes.
 - **Missiles:** fly an arcing path with a smoke trail, can be intercepted by anti-air, frigates and cruisers, and explode on impact.
 - **Combat:** one system handles land, naval, city and air-strike combat. Damage is data-driven, terrain gives cover, and units gain veterancy. Damaged units repair while they sit in friendly cities or ports, faster with engineers nearby, and the **Repair** order sends them to the nearest base.
 - **Economy:** money, metal, fuel, food, electricity and industrial capacity, plus upkeep, shortages and a commodity market.
-- **Technology:** 28 technologies in four branches (Army, Navy, Air & Missiles, Industry). Air units are prepared as future content.
+- **Technology:** 31 technologies in four branches (Army, Navy, Air & Missiles, Industry), including jet aircraft, rotary wing, strategic bombing, aerial refuelling and stealth aircraft.
 - **AI:** each country defends threatened cities, saves up for a planned army mix, researches and builds infrastructure. Strong countries plan wars (target choice, mobilisation, declaration), run land offensives and amphibious operations with transports, patrol and hunt at sea, fire missiles, and make peace when a war drags on or goes badly.
 - **Diplomacy:** peace by default, declarations of war, ceasefires, AI peace offers and mobilisation warnings.
 - **Localisation:** English and Russian UI, including country and city names (`src/i18n.ts`, `src/i18n.ru.ts`).
@@ -113,7 +115,7 @@ The **simulation** (`core/Simulation.ts` and every system it owns) does not depe
 
 **Adding content:** units, buildings, technologies and world events are appended to the matching data file; UI strings go through `t()` and get a Russian entry in `src/i18n.ru.ts`. No system code needs to change.
 
-**Room to grow:** air units (`domain: 'air'` definitions and future techs already exist), alliances, trade, sanctions and espionage (on top of the relations map), more languages (add a dictionary next to `i18n.ru.ts`), and nuclear technology.
+**Room to grow:** alliances, trade, sanctions and espionage (on top of the relations map), more languages (add a dictionary next to `i18n.ru.ts`), and nuclear technology.
 
 ## Credits
 

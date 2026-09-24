@@ -11,7 +11,7 @@ export class ProductionSystem {
   constructor(private sim: Sim) {}
 
   /** Production points per game hour for this city and item domain. */
-  cityRate(c: City, naval: boolean, land: boolean): number {
+  cityRate(c: City, naval: boolean, land: boolean, air = false): number {
     const s = this.sim.state;
     if (c.unrest > 0) return 0;
     const fs = s.factions[c.owner];
@@ -20,6 +20,7 @@ export class ProductionSystem {
     let rate = 0.6 + (c.industry + (b.factory ?? 0) * 1.5) * 0.18;
     if (land) rate *= 1 + (b.barracks ?? 0) * 0.25;
     if (naval) rate *= 1 + (b.shipyard ?? 0) * 0.3;
+    if (air) rate *= 1 + (b.airbase ?? 0) * 0.3;
     rate *= this.sim.tech.getMods(c.owner).prod;
     for (const e of fs.effects) rate *= e.mods.prodMult ?? 1;
     rate *= 0.5 + 0.5 * this.sim.econ.powerRatio(c.owner);
@@ -34,6 +35,7 @@ export class ProductionSystem {
     const fs = this.sim.state.factions[c.owner];
     if (!this.sim.tech.isUnlocked(c.owner, type)) return { ok: false, reason: 'Requires research' };
     if (def.needsPort && !c.port) return { ok: false, reason: 'Requires a port' };
+    if (def.needsAirport && !hasAirfield(c)) return { ok: false, reason: 'Requires an airport or air base' };
     if (c.queue.length >= MAX_QUEUE) return { ok: false, reason: 'Queue full' };
     if (c.unrest > 0) return { ok: false, reason: 'City in unrest' };
     if (checkCost && !canAfford(fs.res, def.cost)) return { ok: false, reason: 'Insufficient resources' };
@@ -88,9 +90,8 @@ export class ProductionSystem {
     for (const c of s.cities) {
       const item = c.queue[0];
       if (!item) continue;
-      const naval = item.kind === 'unit' && unitDef(item.id).domain === 'naval';
-      const land = item.kind === 'unit' && !naval;
-      item.progress += dt * this.cityRate(c, naval, land);
+      const domain = item.kind === 'unit' ? unitDef(item.id).domain : '';
+      item.progress += dt * this.cityRate(c, domain === 'naval', domain === 'land', domain === 'air');
       if (item.progress >= item.time) {
         c.queue.shift();
         this.complete(c, item);
@@ -106,6 +107,7 @@ export class ProductionSystem {
       const a = sim.rng.range(0, Math.PI * 2);
       const r = sim.rng.range(6, 22);
       if (def.domain === 'naval') unit = sim.units.spawn(item.id, c.owner, c.portX + Math.cos(a) * 6, c.portY + Math.sin(a) * 6);
+      else if (def.domain === 'air') unit = sim.units.spawn(item.id, c.owner, c.x + Math.cos(a) * 10, c.y + Math.sin(a) * 10);
       else unit = sim.units.spawn(item.id, c.owner, c.x + Math.cos(a) * r, c.y + Math.sin(a) * r);
       const fs = sim.state.factions[c.owner];
       if (fs) fs.stats.built++;
@@ -113,9 +115,15 @@ export class ProductionSystem {
       c.buildings[item.id] = (c.buildings[item.id] ?? 0) + 1;
       if (item.id === 'fortress') sim.cities.refresh(c);
       if (item.id === 'missile_battery') c.missiles = Math.max(c.missiles, 1);
+      if (item.id === 'airbase') c.airport = true;
     }
     // Income figures refresh on the next hourly economy tick (a full recalc here is costly with ~2000 units).
     if (c.owner === sim.state.player) sim.econ.recalc();
     sim.bus.emit('productionComplete', { city: c, item, unit });
   }
+}
+
+/** Cities with an airport or an air base can build and service aircraft. */
+export function hasAirfield(c: City): boolean {
+  return c.airport || (c.buildings.airbase ?? 0) > 0;
 }

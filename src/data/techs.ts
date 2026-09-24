@@ -40,13 +40,21 @@ export const TECH_DEFS: TechDef[] = [
   { id: 'point_defense', name: 'Point Defence', category: 'navy', tier: 2, desc: '+15% missile interception chance.', cost: { money: 900, metal: 150 }, time: 60, requires: ['sonar'],
     effects: [{ type: 'intercept', add: 0.15 }] },
 
-  // ---------------------------------------------------------------- AIR / FUTURE
+  // ---------------------------------------------------------------- AIR
   { id: 'air_defense', name: 'Air Defence Network', category: 'air', tier: 1, desc: '+10% interception, +20% anti-air range.', cost: { money: 800, metal: 150 }, time: 55, requires: [],
     effects: [{ type: 'intercept', add: 0.1 }, { type: 'stat', target: 'anti_air', stat: 'range', mult: 1.2 }] },
   { id: 'missile_guidance', name: 'Missile Guidance', category: 'air', tier: 2, desc: '+25% missile damage and +1 missile capacity.', cost: { money: 1200, metal: 200, fuel: 80 }, time: 80, requires: ['air_defense'],
     effects: [{ type: 'missile', mult: 1.25, add: 1 }] },
-  { id: 'jet_aircraft', name: 'Jet Aircraft', category: 'air', tier: 3, desc: 'Coming soon: fighter squadrons and airbases.', cost: { money: 2000 }, time: 120, requires: ['missile_guidance'], effects: [], future: true },
-  { id: 'helicopters', name: 'Rotary Wing', category: 'air', tier: 3, desc: 'Coming soon: attack helicopters and paratroopers.', cost: { money: 2000 }, time: 120, requires: ['air_defense'], effects: [], future: true },
+  { id: 'jet_aircraft', name: 'Jet Aircraft', category: 'air', tier: 1, desc: 'Unlocks Fighter Jets and Strike Aircraft (built in cities with an airport or air base).', cost: { money: 900, metal: 150, fuel: 60 }, time: 60, requires: [],
+    effects: [{ type: 'unlock', unit: 'fighter' }, { type: 'unlock', unit: 'strike_fighter' }] },
+  { id: 'helicopters', name: 'Rotary Wing', category: 'air', tier: 1, desc: 'Unlocks Attack Helicopters and Transport Helicopters.', cost: { money: 800, metal: 120, fuel: 50 }, time: 55, requires: [],
+    effects: [{ type: 'unlock', unit: 'helicopter' }, { type: 'unlock', unit: 'transport_heli' }] },
+  { id: 'strategic_bombing', name: 'Strategic Bombing', category: 'air', tier: 3, desc: 'Unlocks Strategic Bombers.', cost: { money: 2000, metal: 350, fuel: 150 }, time: 120, requires: ['jet_aircraft'],
+    effects: [{ type: 'unlock', unit: 'bomber' }] },
+  { id: 'stealth_aircraft', name: 'Stealth Aircraft', category: 'air', tier: 3, desc: '+20% attack and defence for all aircraft.', cost: { money: 2200, metal: 400, fuel: 150 }, time: 130, requires: ['jet_aircraft'],
+    effects: [{ type: 'stat', target: 'air', stat: 'attack', mult: 1.2 }, { type: 'stat', target: 'air', stat: 'defense', mult: 1.2 }] },
+  { id: 'aerial_refueling', name: 'Aerial Refuelling', category: 'air', tier: 2, desc: '+40% aircraft endurance and +10% aircraft speed.', cost: { money: 1200, metal: 150, fuel: 120 }, time: 80, requires: ['jet_aircraft'],
+    effects: [{ type: 'stat', target: 'air', stat: 'speed', mult: 1.1 }] },
 
   // ---------------------------------------------------------------- INDUSTRY
   { id: 'mass_production', name: 'Mass Production', category: 'industry', tier: 1, desc: '+15% production speed.', cost: { money: 700, metal: 100 }, time: 50, requires: [],

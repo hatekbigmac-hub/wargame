@@ -11,6 +11,8 @@ import type { Sim } from '../core/Simulation';
 import { CITY_MISSILE_RANGE } from '../combat/CombatSystem';
 import { declareWar, makePeace, militaryStrength, wouldAcceptPeace, lastPeace } from '../diplomacy/Diplomacy';
 import { t } from '../i18n';
+import { forcePlan } from '../data/military';
+import { hasAirfield } from '../production/ProductionSystem';
 
 interface CityInfo {
   city: City;
@@ -24,6 +26,9 @@ const LAND_WEIGHTS: Record<string, number> = {
 };
 const NAVAL_WEIGHTS: Record<string, number> = {
   patrol_boat: 1, frigate: 1.4, destroyer: 2, submarine: 1.3, cruiser: 1, missile_ship: 1, carrier: 0.35, transport: 0.8,
+};
+const AIR_WEIGHTS: Record<string, number> = {
+  fighter: 1.2, strike_fighter: 0.9, helicopter: 0.9, bomber: 0.25, transport_heli: 0.1,
 };
 const DEFAULT_PERS = { aggression: 0.5, naval: 0.5, tech: 0.5, defense: 0.5 };
 
@@ -88,6 +93,7 @@ export class AISystem {
     for (const u of s.units.values()) if (u.owner === f && !u.dead) myUnits.push(u);
     const land = myUnits.filter((u) => unitDef(u.type).domain === 'land');
     const naval = myUnits.filter((u) => unitDef(u.type).domain === 'naval');
+    const air = myUnits.filter((u) => unitDef(u.type).domain === 'air');
     const enemies = enemiesOf(s, f).filter((e) => s.factions[e]?.alive);
     const fighting = enemies.length > 0 || myCities.some((c) => s.time - c.lastAttacked < 10);
 
@@ -116,7 +122,7 @@ export class AISystem {
     if (fighting) this.defend(infos, land);
     this.research(f);
     const saving = !s.factions[f].research && sim.tech.available(f).length > 0 && !fighting && sim.rng.chance(0.5);
-    if (!saving) this.produce(f, ai, infos, land.length, naval.length, fighting || ai.war?.phase === 'mobilize');
+    if (!saving) this.produce(f, ai, infos, land.length, naval.length, fighting || ai.war?.phase === 'mobilize', air.length);
     this.build(f, infos);
     this.warPlanning(f, ai, myCities, land, enemies);
     if (enemies.length) {
@@ -125,6 +131,7 @@ export class AISystem {
     }
     this.progressAmphibious(ai);
     this.navy(f, ai, naval, myCities);
+    if (enemies.length && air.length) this.airOps(f, ai, air, infos);
     if (enemies.length) this.missiles(f, myUnits, myCities, ai);
   }
 
@@ -256,7 +263,7 @@ export class AISystem {
     return pick ? UNIT_MAP[pick] : null;
   }
 
-  private produce(f: FactionId, ai: AIState, infos: CityInfo[], landCount: number, navalCount: number, war: boolean): void {
+  private produce(f: FactionId, ai: AIState, infos: CityInfo[], landCount: number, navalCount: number, war: boolean, airCount = 0): void {
     const sim = this.sim;
     const fs = sim.state.factions[f];
     const pers = this.pers(f);
@@ -265,7 +272,7 @@ export class AISystem {
     if (!war) target *= 0.55;
     // Keep roughly the real-world standing forces (and grow them a little in wartime).
     if (ai.baseline) target = Math.max(target, ai.baseline * (war ? 1.1 : 0.95));
-    const total = landCount + navalCount;
+    const total = landCount + navalCount + airCount;
     if (total >= target) return;
     let queued = 0;
     // 1. Emergency levies for cities about to fall.
@@ -287,12 +294,15 @@ export class AISystem {
       if (!ai.plan) {
         const free = infos.filter((i) => i.city.queue.length < 2 && i.city.unrest <= 0);
         if (!free.length) return;
-        const wantNaval = navalCount < navalTarget && sim.rng.chance(0.5);
-        const pool = wantNaval ? free.filter((i) => i.city.port) : free;
+        const startAir = Object.values(forcePlan(f).air).reduce((a, b) => a + b, 0);
+        const airTarget = Math.max(startAir, Math.round(total * 0.12));
+        const wantAir = !!startAir && airCount < airTarget && sim.rng.chance(0.4);
+        const wantNaval = !wantAir && navalCount < navalTarget && sim.rng.chance(0.5);
+        const pool = wantAir ? free.filter((i) => hasAirfield(i.city)) : wantNaval ? free.filter((i) => i.city.port) : free;
         if (!pool.length) return;
         const info = sim.rng.weighted(pool, (i) => (i.enemy + 1) * (i.city.industry + 1));
         if (!info) return;
-        const def = this.pickUnit(wantNaval ? NAVAL_WEIGHTS : LAND_WEIGHTS, info.city);
+        const def = this.pickUnit(wantAir ? AIR_WEIGHTS : wantNaval ? NAVAL_WEIGHTS : LAND_WEIGHTS, info.city);
         if (!def) return;
         ai.plan = { unit: def.id, city: info.city.id };
       }
@@ -634,6 +644,71 @@ export class AISystem {
     ai.lastNaval = s.time;
   }
 
+  /** Air force: fighters win the skies, strike aircraft and helicopters hit troops, bombers hit cities. */
+  private airOps(f: FactionId, ai: AIState, air: Unit[], infos: CityInfo[]): void {
+    const sim = this.sim;
+    const s = sim.state;
+    const threatened = infos.filter((i) => i.enemy > 0).sort((a, b) => b.enemy * b.city.importance - a.enemy * a.city.importance);
+    const opTargets = ai.ops.map((o) => s.cities[o.targetCity]).filter((c): c is City => !!c && atWar(s, f, c.owner));
+    for (const u of air) {
+      if (u.order || u.cargo?.length) continue;
+      const def = unitDef(u.type);
+      if (def.attack <= 0) continue;
+      const endur = sim.units.endurance(u);
+      if (u.landed && (u.fuel ?? 0) < endur * 0.8) continue;
+      const radius = endur * sim.tech.stats(f, u.type).speed * 0.35;
+      const inReach = (x: number, y: number) => Math.hypot(x - u.x, y - u.y) < radius;
+      const enemyNear = (x: number, y: number, r: number, pred: (o: Unit) => boolean): Unit | null => {
+        let best: Unit | null = null;
+        let bd = Infinity;
+        sim.spatial.forEachInRange(x, y, r, (o, d2) => {
+          if (!atWar(s, f, o.owner) || !sim.combat.canSee(f, o) || !pred(o)) return;
+          if (d2 < bd) {
+            bd = d2;
+            best = o;
+          }
+        });
+        return best;
+      };
+      const canHit = (o: Unit) => (def.vs[unitDef(o.type).cls] ?? 0) > 0;
+      if (u.type === 'fighter') {
+        // Intercept enemy aircraft near our cities or our fighter; else cover an offensive or a threatened city.
+        const bandit = enemyNear(u.x, u.y, Math.min(radius, 700), (o) => unitDef(o.type).domain === 'air' && !o.landed);
+        if (bandit) {
+          sim.units.orderAttackUnit([u], bandit);
+          continue;
+        }
+        const cover = opTargets.find((c) => inReach(c.x, c.y)) ?? threatened.find((i) => inReach(i.city.x, i.city.y))?.city;
+        if (cover && sim.rng.chance(0.5)) sim.units.orderMove([u], cover.x, cover.y, true);
+        continue;
+      }
+      if (u.type === 'bomber') {
+        const target = opTargets.find((c) => inReach(c.x, c.y)) ?? s.cities.filter((c) => atWar(s, f, c.owner) && inReach(c.x, c.y)).sort((a, b) => b.importance - a.importance)[0];
+        if (target) sim.units.orderAttackCity([u], target);
+        continue;
+      }
+      // Strike aircraft & attack helicopters: enemy troops threatening our cities, then offensive targets.
+      let target: Unit | null = null;
+      for (const i of threatened) {
+        if (!inReach(i.city.x, i.city.y)) continue;
+        target = enemyNear(i.city.x, i.city.y, 380, (o) => unitDef(o.type).domain !== 'air' && canHit(o));
+        if (target) break;
+      }
+      if (!target) {
+        for (const c of opTargets) {
+          if (!inReach(c.x, c.y)) continue;
+          target = enemyNear(c.x, c.y, 260, (o) => unitDef(o.type).domain !== 'air' && canHit(o));
+          if (target) break;
+          if ((def.vs.city ?? 0) > 0 && c.hp > 0) {
+            sim.units.orderAttackCity([u], c);
+            break;
+          }
+        }
+      }
+      if (target) sim.units.orderAttackUnit([u], target);
+    }
+  }
+
   private missiles(f: FactionId, myUnits: Unit[], myCities: City[], ai: AIState): void {
     const sim = this.sim;
     const s = sim.state;
@@ -644,6 +719,7 @@ export class AISystem {
       let bestV = 2.2;
       sim.spatial.forEachInRange(x, y, range, (o) => {
         if (!atWar(s, f, o.owner) || !sim.combat.canSee(f, o)) return;
+        if (unitDef(o.type).domain === 'air' && !o.landed) return;
         const v = unitPower(o) * (unitDef(o.type).domain === 'naval' ? 1.3 : 1);
         if (v > bestV) {
           bestV = v;
